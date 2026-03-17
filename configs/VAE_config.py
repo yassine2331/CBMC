@@ -1,8 +1,15 @@
-from dataclasses import dataclass
-from typing import Tuple
+from dataclasses import dataclass, field
+from typing import Optional, Tuple
 
 @dataclass
 class TrainingConfig:
+    # Experiment identity — used by run.py to load and log experiments
+    experiment_name: str = "default"
+    # Must match a key registered in models/registry.py.
+    # VAE models:  "dynamic_vae"
+    # CEM models:  "cem_v1", "cem_v2"
+    model_name: str = "dynamic_vae"
+
     # Training Loop params
     root_dir: str = ".."
     train_batch_size: int = 64
@@ -20,35 +27,52 @@ class TrainingConfig:
     hub_private_repo: bool = False
     overwrite_output_dir: bool = True
     seed: int = 0
-    
-    # Concept / Context params
-    concept: bool = True 
-    context_dim: int = 8  # Dimension of context (CBM concept vector)
+
+    # ------------------------------------------------------------------ #
+    # Concept / Context params (shared by VAE and CEM families)           #
+    # ------------------------------------------------------------------ #
+    concept: bool = True
+    context_dim: int = 8   # dimension of the concept context vector fed to the VAE
     skip_concept: bool = False
-    num_concepts: int = 10
-    
-    # Model Architecture
+    num_concepts: int = 10  # number of concepts (used by CEM models)
+
+    # ------------------------------------------------------------------ #
+    # VAE Architecture                                                    #
+    # ------------------------------------------------------------------ #
     image_size: int = 32
     in_channels: int = 1
     out_channels: int = 1
     layers_per_block: int = 2
-    latent_channels: int = 4 # Added this as it's required for VAEs
-    
+    latent_channels: int = 4
+
     block_out_channels: Tuple[int, ...] = (128, 128, 256, 256, 512)
-    
-    # These match the class names in diffusers.models.unet_2d_blocks
+
+    # These match the class names registered in models/CBM_VAE.BLOCK_REGISTRY
     down_block_types: Tuple[str, ...] = (
-        "DownBlock2D", 
-        "DownBlock2D", 
-        "DownBlock2D", 
-        "AttnDownBlock2D", # Cross-Attn block
-        "DownBlock2D"
+        "DownEncoderBlock2D",
+        "DownEncoderBlock2D",
+        "DownEncoderBlock2D",
+        "CrossAttnDownBlock2D",  # cross-attention block for concept conditioning
+        "DownEncoderBlock2D",
     )
-    
+
     up_block_types: Tuple[str, ...] = (
-        "UpBlock2D", 
-        "AttnUpBlock2D",   # Cross-Attn block
-        "UpBlock2D", 
-        "UpBlock2D", 
-        "UpBlock2D"
+        "UpDecoderBlock2D",
+        "AttnUpDecoderBlock2D",  # self-attention decoder block
+        "UpDecoderBlock2D",
+        "UpDecoderBlock2D",
+        "UpDecoderBlock2D",
     )
+
+    # ------------------------------------------------------------------ #
+    # CEM Architecture                                                    #
+    # Fields used by cem_v1, cem_v2 (ignored when training a VAE model). #
+    # ------------------------------------------------------------------ #
+    input_dim: int = 128        # raw feature dimension fed to the CEM
+    hidden_dim: int = 64        # width of hidden layers inside per-concept networks
+    embedding_dim: int = 16     # size of each concept's positive/negative embedding
+    depth: int = 2              # number of hidden layers in each sub-network
+    dropout: float = 0.2        # dropout rate
+    # CEM_v2 only: size of the shared backbone output.
+    # None → defaults to hidden_dim * 2 inside the model.
+    shared_dim: Optional[int] = None
