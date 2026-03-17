@@ -170,6 +170,18 @@ class CEM(nn.Module):
 
         return final_embeddings_flat, predicted_concepts
 
+    @classmethod
+    def from_config(cls, config):
+        """Build a CEM from a TrainingConfig."""
+        return cls(
+            input_dim=config.input_dim,
+            n_concepts=config.num_concepts,
+            hidden_dim=config.hidden_dim,
+            embedding_dim=config.embedding_dim,
+            depth=config.depth,
+            dropout=config.dropout,
+        )
+
 # --- Test Block ---
 if __name__ == "__main__":
     batch_size = 4

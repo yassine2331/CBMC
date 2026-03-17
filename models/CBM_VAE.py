@@ -176,6 +176,26 @@ class DynamicVAE(ModelMixin, ConfigMixin):
             h = block(h)
         return self.conv_out(h)
 
+    # ------------------------------------------------------------------ #
+    # Factory                                                              #
+    # ------------------------------------------------------------------ #
+
+    @classmethod
+    def from_config(cls, config):
+        """Build a DynamicVAE from a TrainingConfig (or any object with the
+        same attributes).  Only the VAE-relevant fields are used."""
+        return cls(
+            in_channels=config.in_channels,
+            out_channels=config.out_channels,
+            block_out_channels=config.block_out_channels,
+            down_block_types=config.down_block_types,
+            up_block_types=config.up_block_types,
+            layers_per_block=config.layers_per_block,
+            latent_channels=config.latent_channels,
+            context_dim=config.context_dim,
+            sample_size=config.image_size,
+        )
+
     def forward(self, sample, encoder_hidden_states=None, sample_posterior=True, return_dict=True):
         posterior = self.encode(sample, encoder_hidden_states)
         z = posterior.sample() if sample_posterior else posterior.mode()
