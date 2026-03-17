@@ -1,3 +1,7 @@
 
 
 *.h5
+
+PyTorchVAE
+
+datasets/shapes3d_extracted

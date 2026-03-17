@@ -6,6 +6,18 @@ from sklearn.base import BaseEstimator, ClassifierMixin
 import pandas as pd
 
 class CEM_embeddings(nn.Module):
+    """
+    Docstring for CEM_embeddings
+    Creates positive and negative concept embeddings for each concept.
+
+    Args:
+        input_dim (int): Dimension of the input features.
+        n_concepts (int): Number of concepts.
+        hidden_dim (int): Hidden layer dimension for concept networks.
+        embedding_dim (int): Dimension of the output embeddings.
+        depth (int): Number of hidden layers in each concept network.
+        dropout (float): Dropout rate for regularization.
+    """
     def __init__(self, input_dim, n_concepts=None, hidden_dim=64, embedding_dim=16, 
                  depth=2, output_dim=2, concept_names=None, dropout=0.2, feature_names=None):
         super().__init__()
@@ -15,7 +27,7 @@ class CEM_embeddings(nn.Module):
             self.n_concepts = len(concept_names)
   
         self.embedding_dim = embedding_dim
-        self.input_dim = input_dim - self.n_concepts 
+        self.input_dim = input_dim
         
         positive_concept_networks = []
         negative_concept_networks = []
@@ -51,8 +63,8 @@ class CEM_embeddings(nn.Module):
         negative_concept_outputs = []
         
         for i, (pos_net, neg_net) in enumerate(zip(self.positive_concept_networks, self.negative_concept_networks)):
-            positive_concept_outputs.append(pos_net(x[:, :, i]))
-            negative_concept_outputs.append(neg_net(x[:, :, i]))
+            positive_concept_outputs.append(pos_net(x))
+            negative_concept_outputs.append(neg_net(x))
             
         # Stack to keep concept dimension clear: [batch, embedding_dim, n_concepts]
         pos_out = torch.stack(positive_concept_outputs, dim=2)
@@ -87,6 +99,18 @@ class CEM_REGRESSION(nn.Module):
         return torch.cat(concept_outputs, dim=1)
 
 class CEM(nn.Module):
+    """
+    Docstring for CEM
+    Concept Embedding Model (CEM) that creates concept-specific embeddings
+    and predicts concept values.
+    Args:
+        input_dim (int): Dimension of the input features.
+        n_concepts (int): Number of concepts.
+        hidden_dim (int): Hidden layer dimension for concept networks.
+        embedding_dim (int): Dimension of the output embeddings.
+        depth (int): Number of hidden layers in each concept network.
+        dropout (float): Dropout rate for regularization.
+    """
     def __init__(self, input_dim, n_concepts=None, hidden_dim=64, embedding_dim=16, 
                  depth=2, output_dim=2, concept_names=None, dropout=0.2, feature_names=None):
         super().__init__()
@@ -103,23 +127,39 @@ class CEM(nn.Module):
             n_concepts=self.n_concepts, embedding_dim=embedding_dim, 
             hidden_dim=hidden_dim, depth=depth, dropout=dropout
         )
+        # defining batch normalization layer
+        # self.batch_norm_pos = nn.BatchNorm1d(embedding_dim )
+        # self.batch_norm_neg = nn.BatchNorm1d(embedding_dim )
+
 
     def forward(self, x, interventions=None):
-        # 1. Get pos/neg embeddings: [batch, embedding_dim, n_concepts]
+        # 1. Get pos/neg embeddings: [batch, embedding_dim]
         pos_embeds, neg_embeds = self.cem_embeddings(x)
         
+        # applying batch normalization to the embeddings
+        # pos_embeds = self.batch_norm_pos(pos_embeds.view(-1, self.embedding_dim)).view_as(pos_embeds)
+        # neg_embeds = self.batch_norm_neg(neg_embeds.view(-1, self.embedding_dim)).view_as(neg_embeds)
+
         # 2. Prepare input for regression (concat pos and neg for each concept)
         # Shape becomes [batch, embedding_dim * 2, n_concepts]
         combined_for_reg = torch.cat([pos_embeds, neg_embeds], dim=1)
-        
+        # batch normalization of the combined embeddings
+       
         # 3. Predict concepts
         predicted_concepts = self.cem_regression(combined_for_reg)
         
         # 4. Use predicted or provided intervention weights
         if interventions is None:    
-            weights = torch.sigmoid(predicted_concepts).unsqueeze(1) # [batch, 1, n_concepts]
+            #weights = torch.sigmoid(predicted_concepts).unsqueeze(1) # [batch, 1, n_concepts]
+            # usign a linear activation function and it becomes 1 when x is grater than 1 and 0 when less than -1
+
+            weights = predicted_concepts.unsqueeze(1)*0.5 +0.5
+            weights = torch.clamp(weights, 0.0, 1.0)
         else:
-            weights = torch.sigmoid(interventions).unsqueeze(1)
+            
+            #weights = torch.sigmoid(interventions).unsqueeze(1)
+            weights = interventions.unsqueeze(1)*0.5 +0.5
+            weights = torch.clamp(weights, 0.0, 1.0)
 
         # 5. Weighted sum of embeddings
         # Result shape: [batch, embedding_dim, n_concepts]
@@ -134,17 +174,19 @@ class CEM(nn.Module):
 if __name__ == "__main__":
     batch_size = 4
     n_concepts = 3
-    input_dim_param = 10  # Raw input features (including space for concepts)
-    actual_data_dim = 7   # 10 - 3 = 7 (the features used to predict concepts)
+    input_dim_param = 128  # Raw input features (including space for concepts)
+    actual_data_dim = 125   # 128 - 3 = 125 (the features used to predict concepts)
     embedding_dim = 16
 
     # Input x: [batch, features_per_concept, n_concepts]
-    x = torch.randn(batch_size, actual_data_dim, n_concepts)
+    x = torch.randn(batch_size, input_dim_param)
+
 
     cem_model = CEM(input_dim=input_dim_param, n_concepts=n_concepts, embedding_dim=embedding_dim)
 
     embeddings, concepts = cem_model(x)
 
+    print(f"Input shape:     {x.shape}")          # Expected: [4, 7, 3]
     print(f"Embeddings shape: {embeddings.shape}") # Expected: [4, 48] (3 concepts * 16 dim)
     print(f"Concepts shape:   {concepts.shape}")   # Expected: [4, 3]
     print("concepts :", concepts)
