@@ -5,3 +5,12 @@
 PyTorchVAE
 
 datasets/shapes3d_extracted
+
+# Generated model output directories
+outputs/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+MNIST/

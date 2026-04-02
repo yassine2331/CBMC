@@ -1,8 +1,12 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Tuple
 
 @dataclass
 class TrainingConfig:
+    # Experiment identity — used by run.py to load and log experiments
+    experiment_name: str = "default"
+    model_name: str = "dynamic_vae"  # must match a key in models/registry.py
+
     # Training Loop params
     root_dir: str = ".."
     train_batch_size: int = 64
@@ -38,17 +42,17 @@ class TrainingConfig:
     
     # These match the class names in diffusers.models.unet_2d_blocks
     down_block_types: Tuple[str, ...] = (
-        "DownBlock2D", 
-        "DownBlock2D", 
-        "DownBlock2D", 
-        "AttnDownBlock2D", # Cross-Attn block
-        "DownBlock2D"
+        "DownEncoderBlock2D",
+        "DownEncoderBlock2D",
+        "DownEncoderBlock2D",
+        "CrossAttnDownBlock2D",  # cross-attention block for concept conditioning
+        "DownEncoderBlock2D",
     )
-    
+
     up_block_types: Tuple[str, ...] = (
-        "UpBlock2D", 
-        "AttnUpBlock2D",   # Cross-Attn block
-        "UpBlock2D", 
-        "UpBlock2D", 
-        "UpBlock2D"
+        "UpDecoderBlock2D",
+        "AttnUpDecoderBlock2D",  # self-attention decoder block
+        "UpDecoderBlock2D",
+        "UpDecoderBlock2D",
+        "UpDecoderBlock2D",
     )
