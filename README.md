@@ -1,4 +1,4 @@
-# CBMC — Continuous Bottleneck Model on Continuous Concepts
+# CBMC — Concept Bottleneck Model on Continuous Concepts
 
 CBMC is a research library for experimenting with concept bottleneck models where the concept layer is continuous and architecture-agnostic. You plug `ContinuousBottleneck` between any encoder and any task head.
 
