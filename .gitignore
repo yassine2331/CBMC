@@ -2,9 +2,12 @@
 CHECKPOINT.md
 *.md
 
+
+
 # Data — download separately
 data/raw/
 data/processed/
+data
 
 # Training outputs — too large for git
 outputs/

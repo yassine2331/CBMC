@@ -80,6 +80,32 @@ class VAEConfig(BaseConfig):
     kl_weight:     float     = 1.0         # beta in beta-VAE; 1.0 = standard VAE
 
 
+@dataclass
+class ConvVAEConfig(BaseConfig):
+    """Config for conv-based VAE — for spatial images larger than MNIST."""
+    # Encoder conv channels (each block: Conv -> ReLU -> MaxPool)
+    in_channels:    int       = 4            # 4 for RGBA, 1 for grayscale, 3 for RGB
+    enc_channels:   List[int] = field(default_factory=lambda: [32, 64, 128])
+    latent_dim:     int       = 32
+
+    # Decoder mirrors the encoder
+    dec_channels:   List[int] = field(default_factory=lambda: [128, 64, 32])
+    img_size:       int       = 64           # spatial size after resize (H = W)
+
+    # Loss
+    kl_weight:      float     = 1.0
+
+
+@dataclass
+class CNNRegressionConfig(BaseConfig):
+    """CNN config for regression tasks (continuous targets instead of classes)."""
+    in_channels:   int       = 4            # 4 for RGBA
+    conv_channels: List[int] = field(default_factory=lambda: [32, 64, 128])
+    fc_dims:       List[int] = field(default_factory=lambda: [256])
+    n_outputs:     int       = 4            # number of regression targets
+    dropout:       float     = 0.0
+
+
 # ---------------------------------------------------------------------------
 # Training config
 # ---------------------------------------------------------------------------
