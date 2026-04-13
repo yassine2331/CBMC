@@ -1,0 +1,14 @@
+{
+  "in_channels": 1,
+  "input_dim": 784,
+  "encoder_dims": [
+    400,
+    200
+  ],
+  "latent_dim": 16,
+  "decoder_dims": [
+    200,
+    400
+  ],
+  "kl_weight": 1.0
+}

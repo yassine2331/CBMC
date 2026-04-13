@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cbmc"
+version = "0.1.0"
+description = "Continuous Bottleneck Model on Continuous Concepts"
+requires-python = ">=3.9"
+dependencies = [
+    "torch>=2.0",
+    "diffusers>=0.27",
+    "transformers>=4.40",
+    "accelerate>=0.30",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["cbmc*"]

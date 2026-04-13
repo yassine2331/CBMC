@@ -1,0 +1,93 @@
+"""
+Config dataclasses for all models and training runs.
+
+Each config is a plain Python dataclass — fully serializable to/from JSON.
+Use save() to persist a run's exact config next to its outputs.
+Use load() to reconstruct it for reproducibility or hyperparameter search.
+
+Example:
+    cfg = VAEConfig(latent_dim=32, encoder_dims=[512, 256])
+    cfg.save("outputs/my_run/config.json")
+
+    # later
+    cfg = VAEConfig.load("outputs/my_run/config.json")
+"""
+
+from __future__ import annotations
+
+import json
+import os
+from dataclasses import dataclass, field, asdict
+from typing import List, Type, TypeVar
+
+T = TypeVar("T", bound="BaseConfig")
+
+
+# ---------------------------------------------------------------------------
+# Base
+# ---------------------------------------------------------------------------
+
+@dataclass
+class BaseConfig:
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    def save(self, path: str) -> None:
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        with open(path, "w") as f:
+            json.dump(self.to_dict(), f, indent=2)
+        print(f"Config saved to {path}")
+
+    @classmethod
+    def load(cls: Type[T], path: str) -> T:
+        with open(path) as f:
+            data = json.load(f)
+        return cls(**data)
+
+    def __str__(self) -> str:
+        lines = [f"{self.__class__.__name__}:"]
+        for k, v in self.to_dict().items():
+            lines.append(f"  {k}: {v}")
+        return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Model configs
+# ---------------------------------------------------------------------------
+
+@dataclass
+class CNNConfig(BaseConfig):
+    # Architecture
+    in_channels:   int       = 1           # 1 for grayscale, 3 for RGB
+    conv_channels: List[int] = field(default_factory=lambda: [32, 64, 128])
+    fc_dims:       List[int] = field(default_factory=lambda: [256])
+    n_classes:     int       = 10
+
+    # Regularization
+    dropout:       float     = 0.0         # 0.0 = disabled
+
+
+@dataclass
+class VAEConfig(BaseConfig):
+    # Architecture
+    in_channels:   int       = 1
+    input_dim:     int       = 784         # 28*28 for MNIST
+    encoder_dims:  List[int] = field(default_factory=lambda: [400, 200])
+    latent_dim:    int       = 16
+    decoder_dims:  List[int] = field(default_factory=lambda: [200, 400])
+
+    # Loss
+    kl_weight:     float     = 1.0         # beta in beta-VAE; 1.0 = standard VAE
+
+
+# ---------------------------------------------------------------------------
+# Training config
+# ---------------------------------------------------------------------------
+
+@dataclass
+class TrainConfig(BaseConfig):
+    epochs:      int   = 10
+    lr:          float = 1e-3
+    batch_size:  int   = 128
+    seed:        int   = 42
+    num_workers: int   = 2

@@ -1,0 +1,28 @@
+# Session notes — not for the public repo
+CHECKPOINT.md
+*.md
+
+# Data — download separately
+data/raw/
+data/processed/
+
+# Training outputs — too large for git
+outputs/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Environments
+.env
+.venv/
+
+# macOS
+.DS_Store
