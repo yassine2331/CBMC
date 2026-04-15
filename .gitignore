@@ -8,7 +8,7 @@ CHECKPOINT.md
 data/raw/
 data/processed/
 data
-
+env
 # Training outputs — too large for git
 outputs/
 
