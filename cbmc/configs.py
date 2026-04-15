@@ -81,6 +81,22 @@ class VAEConfig(BaseConfig):
 
 
 @dataclass
+class CBMConfig(BaseConfig):
+    """Scalar concept bottleneck — one learned scalar per concept (linear probe)."""
+    n_concepts:  int   = 8
+
+
+@dataclass
+class CEMConfig(BaseConfig):
+    """Concept Embedding Model — pos/neg embedding pair per concept."""
+    n_concepts:    int   = 8
+    embedding_dim: int   = 16     # output_dim = n_concepts * embedding_dim
+    hidden_dim:    int   = 64
+    depth:         int   = 2
+    dropout:       float = 0.2
+
+
+@dataclass
 class ConvVAEConfig(BaseConfig):
     """Config for conv-based VAE — for spatial images larger than MNIST."""
     # Encoder conv channels (each block: Conv -> ReLU -> MaxPool)

@@ -1,0 +1,7 @@
+{
+  "n_concepts": 10,
+  "embedding_dim": 16,
+  "hidden_dim": 64,
+  "depth": 2,
+  "dropout": 0.2
+}

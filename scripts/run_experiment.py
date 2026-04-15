@@ -26,7 +26,10 @@ import torch.nn as nn
 import torch.optim as optim
 from tqdm import tqdm
 
-from cbmc.configs import VAEConfig, ConvVAEConfig, CNNConfig, CNNRegressionConfig, TrainConfig
+from cbmc.configs import (
+    VAEConfig, ConvVAEConfig, CNNConfig, CNNRegressionConfig,
+    CBMConfig, CEMConfig, TrainConfig,
+)
 from cbmc.data.mnist import get_mnist
 from cbmc.data.pendulum import get_pendulum
 from cbmc.utils.sampling import save_vae_samples
@@ -34,6 +37,10 @@ from architectures.vae_baseline import VAEBaseline, vae_loss
 from architectures.conv_vae_baseline import ConvVAEBaseline, conv_vae_loss
 from architectures.cnn_baseline import CNNBaseline
 from architectures.cnn_regression import CNNRegression
+from architectures.cnn_cbm import CNNwithCBM
+from architectures.cnn_cem import CNNwithCEM
+from architectures.vae_cbm_baseline import VAEwithCBM, vae_cbm_loss
+from architectures.vae_cem_baseline import VAEwithCEM, vae_cem_loss
 
 
 # ---------------------------------------------------------------------------
@@ -226,14 +233,332 @@ def exp_cls_pendulum(device):
 
 
 # ---------------------------------------------------------------------------
+# CBM experiments — scalar concept bottleneck
+# ---------------------------------------------------------------------------
+
+def exp_cbm_gen_mnist(device):
+    print("\n=== [EXP 5] CBM Generation — MNIST ===")
+    backbone_cfg = VAEConfig.load("experiments/configs/exp_cbm_gen_mnist_backbone.json")
+    cbm_cfg      = CBMConfig.load("experiments/configs/cbm_mnist.json")
+    train_cfg    = TrainConfig.load("experiments/configs/train_cbm_mnist.json")
+    set_seed(train_cfg.seed)
+
+    train_loader, test_loader = get_mnist(batch_size=train_cfg.batch_size, num_workers=train_cfg.num_workers)
+    model      = VAEwithCBM(backbone_cfg, cbm_cfg).to(device)
+    optimizer  = optim.Adam(model.parameters(), lr=train_cfg.lr)
+    fixed_x, _ = next(iter(test_loader))
+    out_dir    = "outputs/samples/exp_cbm_gen_mnist"
+
+    for epoch in range(1, train_cfg.epochs + 1):
+        model.train()
+        total_loss, total_recon, total_kl = 0, 0, 0
+        pbar = tqdm(train_loader, desc=f"  Epoch {epoch}/{train_cfg.epochs}", leave=False)
+        for x, _ in pbar:
+            x = x.to(device)
+            recon, concepts, mu, log_var = model(x)
+            loss, recon_l, kl = vae_cbm_loss(recon, x, mu, log_var, backbone_cfg.kl_weight)
+            optimizer.zero_grad(); loss.backward(); optimizer.step()
+            total_loss += loss.item(); total_recon += recon_l.item(); total_kl += kl.item()
+            pbar.set_postfix(loss=f"{loss.item():.2f}", kl=f"{kl.item():.2f}")
+        n = len(train_loader)
+        print(f"  Epoch {epoch}/{train_cfg.epochs}  loss={total_loss/n:.2f}  recon={total_recon/n:.2f}  kl={total_kl/n:.2f}")
+        _save_vae_cbm_samples(model, fixed_x, epoch, out_dir, device)
+
+    backbone_cfg.save("outputs/exp_cbm_gen_mnist/backbone_config.json")
+    cbm_cfg.save("outputs/exp_cbm_gen_mnist/cbm_config.json")
+    train_cfg.save("outputs/exp_cbm_gen_mnist/train_config.json")
+
+
+def exp_cbm_cls_mnist(device):
+    print("\n=== [EXP 6] CBM Classification — MNIST ===")
+    backbone_cfg = CNNConfig.load("experiments/configs/exp_cbm_cls_mnist_backbone.json")
+    cbm_cfg      = CBMConfig.load("experiments/configs/cbm_mnist.json")
+    train_cfg    = TrainConfig.load("experiments/configs/train_cbm_mnist.json")
+    set_seed(train_cfg.seed)
+
+    train_loader, test_loader = get_mnist(batch_size=train_cfg.batch_size, num_workers=train_cfg.num_workers)
+    model     = CNNwithCBM(backbone_cfg, cbm_cfg).to(device)
+    optimizer = optim.Adam(model.parameters(), lr=train_cfg.lr)
+    criterion = nn.CrossEntropyLoss()
+    rows = []
+
+    for epoch in range(1, train_cfg.epochs + 1):
+        model.train()
+        total_loss, total_acc = 0, 0
+        pbar = tqdm(train_loader, desc=f"  Epoch {epoch}/{train_cfg.epochs}", leave=False)
+        for x, y in pbar:
+            x, y = x.to(device), y.to(device)
+            logits, concepts = model(x)
+            loss = criterion(logits, y)
+            optimizer.zero_grad(); loss.backward(); optimizer.step()
+            total_loss += loss.item(); total_acc += accuracy(logits, y)
+            pbar.set_postfix(loss=f"{loss.item():.4f}", acc=f"{accuracy(logits,y):.4f}")
+        n = len(train_loader)
+        train_loss, train_acc = total_loss/n, total_acc/n
+        print(f"  Epoch {epoch}/{train_cfg.epochs}  loss={train_loss:.4f}  acc={train_acc:.4f}")
+        rows.append([epoch, f"{train_loss:.6f}", f"{train_acc:.6f}"])
+
+    model.eval()
+    test_acc = 0
+    with torch.no_grad():
+        for x, y in test_loader:
+            logits, _ = model(x.to(device))
+            test_acc += accuracy(logits, y.to(device))
+    test_acc /= len(test_loader)
+    print(f"  Test accuracy: {test_acc:.4f}")
+    rows.append(["test", "", f"{test_acc:.6f}"])
+
+    save_csv("outputs/results/exp_cbm_cls_mnist.csv", rows, ["epoch", "loss", "accuracy"])
+    backbone_cfg.save("outputs/exp_cbm_cls_mnist/backbone_config.json")
+    cbm_cfg.save("outputs/exp_cbm_cls_mnist/cbm_config.json")
+    train_cfg.save("outputs/exp_cbm_cls_mnist/train_config.json")
+
+
+def exp_cbm_cls_pendulum(device):
+    print("\n=== [EXP 7] CBM Regression — Pendulum ===")
+    backbone_cfg = CNNRegressionConfig.load("experiments/configs/exp_cbm_cls_pendulum_backbone.json")
+    cbm_cfg      = CBMConfig.load("experiments/configs/cbm_pendulum.json")
+    train_cfg    = TrainConfig.load("experiments/configs/train_cbm_pendulum.json")
+    set_seed(train_cfg.seed)
+
+    train_loader, test_loader, label_mean, label_std = get_pendulum(
+        batch_size=train_cfg.batch_size, num_workers=train_cfg.num_workers
+    )
+    label_mean, label_std = label_mean.to(device), label_std.to(device)
+    # n_outputs must match n_concepts for CBM regression (concepts = task targets)
+    model     = CNNwithCBM(backbone_cfg, cbm_cfg, n_outputs=cbm_cfg.n_concepts).to(device)
+    optimizer = optim.Adam(model.parameters(), lr=train_cfg.lr)
+    criterion = nn.MSELoss()
+    rows = []
+
+    for epoch in range(1, train_cfg.epochs + 1):
+        model.train()
+        total_loss = 0
+        pbar = tqdm(train_loader, desc=f"  Epoch {epoch}/{train_cfg.epochs}", leave=False)
+        for x, y in pbar:
+            x, y   = x.to(device), y.to(device)
+            y_norm = (y - label_mean) / label_std
+            preds, concepts = model(x)
+            loss = criterion(preds, y_norm)
+            optimizer.zero_grad(); loss.backward(); optimizer.step()
+            total_loss += loss.item()
+            pbar.set_postfix(mse=f"{loss.item():.4f}")
+        train_mse = total_loss / len(train_loader)
+        print(f"  Epoch {epoch}/{train_cfg.epochs}  mse={train_mse:.4f}")
+        rows.append([epoch, f"{train_mse:.6f}"])
+
+    model.eval()
+    test_mse = 0
+    with torch.no_grad():
+        for x, y in test_loader:
+            x, y = x.to(device), y.to(device)
+            preds, _ = model(x)
+            preds = preds * label_std + label_mean
+            test_mse += criterion(preds, y).item()
+    test_mse /= len(test_loader)
+    print(f"  Test MSE (original scale): {test_mse:.4f}")
+    rows.append(["test", f"{test_mse:.6f}"])
+
+    save_csv("outputs/results/exp_cbm_cls_pendulum.csv", rows, ["epoch", "mse"])
+    backbone_cfg.save("outputs/exp_cbm_cls_pendulum/backbone_config.json")
+    cbm_cfg.save("outputs/exp_cbm_cls_pendulum/cbm_config.json")
+    train_cfg.save("outputs/exp_cbm_cls_pendulum/train_config.json")
+
+
+# ---------------------------------------------------------------------------
+# CEM experiments — concept embedding model
+# ---------------------------------------------------------------------------
+
+def exp_cem_gen_mnist(device):
+    print("\n=== [EXP 8] CEM Generation — MNIST ===")
+    backbone_cfg = VAEConfig.load("experiments/configs/exp_cem_gen_mnist_backbone.json")
+    cem_cfg      = CEMConfig.load("experiments/configs/cem_mnist.json")
+    train_cfg    = TrainConfig.load("experiments/configs/train_cem_mnist.json")
+    set_seed(train_cfg.seed)
+
+    train_loader, test_loader = get_mnist(batch_size=train_cfg.batch_size, num_workers=train_cfg.num_workers)
+    model      = VAEwithCEM(backbone_cfg, cem_cfg).to(device)
+    optimizer  = optim.Adam(model.parameters(), lr=train_cfg.lr)
+    fixed_x, _ = next(iter(test_loader))
+    out_dir    = "outputs/samples/exp_cem_gen_mnist"
+
+    for epoch in range(1, train_cfg.epochs + 1):
+        model.train()
+        total_loss, total_recon, total_kl = 0, 0, 0
+        pbar = tqdm(train_loader, desc=f"  Epoch {epoch}/{train_cfg.epochs}", leave=False)
+        for x, _ in pbar:
+            x = x.to(device)
+            recon, concepts, mu, log_var = model(x)
+            loss, recon_l, kl = vae_cem_loss(recon, x, mu, log_var, backbone_cfg.kl_weight)
+            optimizer.zero_grad(); loss.backward(); optimizer.step()
+            total_loss += loss.item(); total_recon += recon_l.item(); total_kl += kl.item()
+            pbar.set_postfix(loss=f"{loss.item():.2f}", kl=f"{kl.item():.2f}")
+        n = len(train_loader)
+        print(f"  Epoch {epoch}/{train_cfg.epochs}  loss={total_loss/n:.2f}  recon={total_recon/n:.2f}  kl={total_kl/n:.2f}")
+        _save_vae_cem_samples(model, fixed_x, epoch, out_dir, device)
+
+    backbone_cfg.save("outputs/exp_cem_gen_mnist/backbone_config.json")
+    cem_cfg.save("outputs/exp_cem_gen_mnist/cem_config.json")
+    train_cfg.save("outputs/exp_cem_gen_mnist/train_config.json")
+
+
+def exp_cem_cls_mnist(device):
+    print("\n=== [EXP 9] CEM Classification — MNIST ===")
+    backbone_cfg = CNNConfig.load("experiments/configs/exp_cem_cls_mnist_backbone.json")
+    cem_cfg      = CEMConfig.load("experiments/configs/cem_mnist.json")
+    train_cfg    = TrainConfig.load("experiments/configs/train_cem_mnist.json")
+    set_seed(train_cfg.seed)
+
+    train_loader, test_loader = get_mnist(batch_size=train_cfg.batch_size, num_workers=train_cfg.num_workers)
+    model     = CNNwithCEM(backbone_cfg, cem_cfg).to(device)
+    optimizer = optim.Adam(model.parameters(), lr=train_cfg.lr)
+    criterion = nn.CrossEntropyLoss()
+    rows = []
+
+    for epoch in range(1, train_cfg.epochs + 1):
+        model.train()
+        total_loss, total_acc = 0, 0
+        pbar = tqdm(train_loader, desc=f"  Epoch {epoch}/{train_cfg.epochs}", leave=False)
+        for x, y in pbar:
+            x, y = x.to(device), y.to(device)
+            logits, concepts = model(x)
+            loss = criterion(logits, y)
+            optimizer.zero_grad(); loss.backward(); optimizer.step()
+            total_loss += loss.item(); total_acc += accuracy(logits, y)
+            pbar.set_postfix(loss=f"{loss.item():.4f}", acc=f"{accuracy(logits,y):.4f}")
+        n = len(train_loader)
+        train_loss, train_acc = total_loss/n, total_acc/n
+        print(f"  Epoch {epoch}/{train_cfg.epochs}  loss={train_loss:.4f}  acc={train_acc:.4f}")
+        rows.append([epoch, f"{train_loss:.6f}", f"{train_acc:.6f}"])
+
+    model.eval()
+    test_acc = 0
+    with torch.no_grad():
+        for x, y in test_loader:
+            logits, _ = model(x.to(device))
+            test_acc += accuracy(logits, y.to(device))
+    test_acc /= len(test_loader)
+    print(f"  Test accuracy: {test_acc:.4f}")
+    rows.append(["test", "", f"{test_acc:.6f}"])
+
+    save_csv("outputs/results/exp_cem_cls_mnist.csv", rows, ["epoch", "loss", "accuracy"])
+    backbone_cfg.save("outputs/exp_cem_cls_mnist/backbone_config.json")
+    cem_cfg.save("outputs/exp_cem_cls_mnist/cem_config.json")
+    train_cfg.save("outputs/exp_cem_cls_mnist/train_config.json")
+
+
+def exp_cem_cls_pendulum(device):
+    print("\n=== [EXP 10] CEM Regression — Pendulum ===")
+    backbone_cfg = CNNRegressionConfig.load("experiments/configs/exp_cem_cls_pendulum_backbone.json")
+    cem_cfg      = CEMConfig.load("experiments/configs/cem_pendulum.json")
+    train_cfg    = TrainConfig.load("experiments/configs/train_cem_pendulum.json")
+    set_seed(train_cfg.seed)
+
+    train_loader, test_loader, label_mean, label_std = get_pendulum(
+        batch_size=train_cfg.batch_size, num_workers=train_cfg.num_workers
+    )
+    label_mean, label_std = label_mean.to(device), label_std.to(device)
+    model     = CNNwithCEM(backbone_cfg, cem_cfg, n_outputs=backbone_cfg.n_outputs).to(device)
+    optimizer = optim.Adam(model.parameters(), lr=train_cfg.lr)
+    criterion = nn.MSELoss()
+    rows = []
+
+    for epoch in range(1, train_cfg.epochs + 1):
+        model.train()
+        total_loss = 0
+        pbar = tqdm(train_loader, desc=f"  Epoch {epoch}/{train_cfg.epochs}", leave=False)
+        for x, y in pbar:
+            x, y   = x.to(device), y.to(device)
+            y_norm = (y - label_mean) / label_std
+            preds, concepts = model(x)
+            loss = criterion(preds, y_norm)
+            optimizer.zero_grad(); loss.backward(); optimizer.step()
+            total_loss += loss.item()
+            pbar.set_postfix(mse=f"{loss.item():.4f}")
+        train_mse = total_loss / len(train_loader)
+        print(f"  Epoch {epoch}/{train_cfg.epochs}  mse={train_mse:.4f}")
+        rows.append([epoch, f"{train_mse:.6f}"])
+
+    model.eval()
+    test_mse = 0
+    with torch.no_grad():
+        for x, y in test_loader:
+            x, y = x.to(device), y.to(device)
+            preds, _ = model(x)
+            preds = preds * label_std + label_mean
+            test_mse += criterion(preds, y).item()
+    test_mse /= len(test_loader)
+    print(f"  Test MSE (original scale): {test_mse:.4f}")
+    rows.append(["test", f"{test_mse:.6f}"])
+
+    save_csv("outputs/results/exp_cem_cls_pendulum.csv", rows, ["epoch", "mse"])
+    backbone_cfg.save("outputs/exp_cem_cls_pendulum/backbone_config.json")
+    cem_cfg.save("outputs/exp_cem_cls_pendulum/cem_config.json")
+    train_cfg.save("outputs/exp_cem_cls_pendulum/train_config.json")
+
+
+# ---------------------------------------------------------------------------
+# Sample helpers for concept models (VAE variants)
+# ---------------------------------------------------------------------------
+
+def _save_vae_cbm_samples(model, fixed_x, epoch, out_dir, device):
+    """Save sample grid for VAE+CBM: originals | reconstructions | prior samples."""
+    import os, torchvision.utils as vutils
+    from torchvision.transforms.functional import to_pil_image
+    os.makedirs(out_dir, exist_ok=True)
+    model.eval()
+    n = 8
+    with torch.no_grad():
+        x = fixed_x[:n].to(device)
+        recon, concepts, mu, _ = model(x)
+        # sample from prior: z ~ N(0,1) → CBM → decode
+        z_prior   = torch.randn(n, model.backbone_cfg.latent_dim, device=device)
+        c_prior   = model.cbm(z_prior)
+        generated = model.decode(c_prior, x.shape[1:])
+    x_disp = (x * 0.3081 + 0.1307).clamp(0, 1)
+    grid = vutils.make_grid(torch.cat([x_disp, recon, generated]), nrow=n, padding=2)
+    to_pil_image(grid.cpu()).save(os.path.join(out_dir, f"epoch_{epoch:03d}.png"))
+    print(f"  -> saved samples: {out_dir}/epoch_{epoch:03d}.png")
+
+
+def _save_vae_cem_samples(model, fixed_x, epoch, out_dir, device):
+    """Save sample grid for VAE+CEM: originals | reconstructions | prior samples."""
+    import os, torchvision.utils as vutils
+    from torchvision.transforms.functional import to_pil_image
+    os.makedirs(out_dir, exist_ok=True)
+    model.eval()
+    n = 8
+    with torch.no_grad():
+        x = fixed_x[:n].to(device)
+        recon, concepts, mu, _ = model(x)
+        # sample from prior: z ~ N(0,1) → CEM → decode
+        z_prior              = torch.randn(n, model.backbone_cfg.latent_dim, device=device)
+        embeddings, _        = model.cem(z_prior)
+        generated            = model.decode(embeddings, x.shape[1:])
+    x_disp = (x * 0.3081 + 0.1307).clamp(0, 1)
+    grid = vutils.make_grid(torch.cat([x_disp, recon, generated]), nrow=n, padding=2)
+    to_pil_image(grid.cpu()).save(os.path.join(out_dir, f"epoch_{epoch:03d}.png"))
+    print(f"  -> saved samples: {out_dir}/epoch_{epoch:03d}.png")
+
+
+# ---------------------------------------------------------------------------
 # Entrypoint
 # ---------------------------------------------------------------------------
 
 EXPERIMENTS = {
-    "exp_gen_mnist":    exp_gen_mnist,
-    "exp_gen_pendulum": exp_gen_pendulum,
-    "exp_cls_mnist":    exp_cls_mnist,
-    "exp_cls_pendulum": exp_cls_pendulum,
+    # Baseline (no concepts)
+    "exp_gen_mnist":        exp_gen_mnist,
+    "exp_gen_pendulum":     exp_gen_pendulum,
+    "exp_cls_mnist":        exp_cls_mnist,
+    "exp_cls_pendulum":     exp_cls_pendulum,
+    # CBM (scalar concepts)
+    "exp_cbm_gen_mnist":    exp_cbm_gen_mnist,
+    "exp_cbm_cls_mnist":    exp_cbm_cls_mnist,
+    "exp_cbm_cls_pendulum": exp_cbm_cls_pendulum,
+    # CEM (concept embeddings)
+    "exp_cem_gen_mnist":    exp_cem_gen_mnist,
+    "exp_cem_cls_mnist":    exp_cem_cls_mnist,
+    "exp_cem_cls_pendulum": exp_cem_cls_pendulum,
 }
 
 def main():
