@@ -16,6 +16,7 @@ def save_vae_samples(
     out_dir: str,
     n_samples: int = 8,
     device: str = "cpu",
+    mnist_unnorm: bool = False,
 ):
     """
     Saves two rows of images to out_dir/epoch_{epoch:03d}.png:
@@ -44,8 +45,7 @@ def save_vae_samples(
         z = torch.randn(n_samples, model.latent_dim, device=device)
         generated = model.decode(z, x.shape[1:])
 
-    # Unnormalize originals from MNIST normalization back to [0,1]
-    x_display = (x * 0.3081 + 0.1307).clamp(0, 1)
+    x_display = (x * 0.3081 + 0.1307).clamp(0, 1) if mnist_unnorm else x.clamp(0, 1)
 
     grid = vutils.make_grid(
         torch.cat([x_display, recon, generated], dim=0),

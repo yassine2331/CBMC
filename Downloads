@@ -1,0 +1,291 @@
+import os
+import sys
+# --- FIX START ---
+# 1. Get the folder where this script lives (.../PyTorch-VAE/models)
+current_dir = os.path.dirname(os.path.abspath(__file__))
+
+# 2. Get the parent folder (.../PyTorch-VAE)
+parent_dir = os.path.dirname(current_dir)
+
+# 3. Add the parent to sys.path so 'from models import ...' works
+sys.path.append(parent_dir)
+
+# 4. Add your custom CBMs path
+sys.path.append("/home/oueslatiy/CBMC/CBMC/models/CBMs")
+# --- FIX END ---
+
+import torch
+from torch import Tensor
+
+
+from CEM import CEM
+
+from typing import List
+
+import torch
+from models import BaseVAE
+from torch import nn
+from torch.nn import functional as F
+#from .types_ import *
+
+class CBMVAE(BaseVAE):
+
+    num_iter = 0 # Global static variable to keep track of iterations
+
+    def __init__(self,
+                 in_channels: int,
+                 latent_dim: int,
+                 hidden_dims: List = None,
+                 beta: int = 4,
+                 gamma:float = 1000.,
+                 max_capacity: int = 25,
+                 Capacity_max_iter: int = 1e5,
+                 loss_type:str = 'B',
+                    n_concepts: int = 3,
+                    embedding_dim: int = 16,
+                    post_cem_layers: int = 2,
+                 **kwargs) -> None:
+        super(CBMVAE, self).__init__()
+
+      
+        self.latent_dim = latent_dim
+        self.beta = beta
+        self.gamma = gamma
+        self.loss_type = loss_type
+        self.C_max = torch.Tensor([max_capacity])
+        self.C_stop_iter = Capacity_max_iter
+
+        modules = []
+        if hidden_dims is None:
+            hidden_dims = [32, 64, 128, 256, 512]
+
+        # Build Encoder
+        for h_dim in hidden_dims:
+            modules.append(
+                nn.Sequential(
+                    nn.Conv2d(in_channels, out_channels=h_dim,
+                              kernel_size= 3, stride= 2, padding  = 1),
+                    nn.BatchNorm2d(h_dim),
+                    nn.LeakyReLU())
+            )
+            in_channels = h_dim
+
+        self.encoder = nn.Sequential(*modules)
+        self.fc_mu = nn.Linear(hidden_dims[-1]*4, latent_dim)
+        self.fc_var = nn.Linear(hidden_dims[-1]*4, latent_dim)
+
+
+        # Build Decoder
+        modules = []
+
+        self.decoder_input = nn.Linear(latent_dim, hidden_dims[-1] * 4)
+
+        hidden_dims.reverse()
+
+        for i in range(len(hidden_dims) - 1):
+            modules.append(
+                nn.Sequential(
+                    nn.ConvTranspose2d(hidden_dims[i],
+                                       hidden_dims[i + 1],
+                                       kernel_size=3,
+                                       stride = 2,
+                                       padding=1,
+                                       output_padding=1),
+                    nn.BatchNorm2d(hidden_dims[i + 1]),
+                    nn.LeakyReLU())
+            )
+
+
+
+        self.decoder = nn.Sequential(*modules)
+
+        self.final_layer = nn.Sequential(
+                            nn.ConvTranspose2d(hidden_dims[-1],
+                                               hidden_dims[-1],
+                                               kernel_size=3,
+                                               stride=2,
+                                               padding=1,
+                                               output_padding=1),
+                            nn.BatchNorm2d(hidden_dims[-1]),
+                            nn.LeakyReLU(),
+                            nn.Conv2d(hidden_dims[-1], out_channels= 3,
+                                      kernel_size= 3, padding= 1),
+                            nn.Tanh())
+
+        # build CEM model
+        self.cem_model = CEM(input_dim=latent_dim, n_concepts=n_concepts, embedding_dim=embedding_dim)
+        self.post_cem_fc = []
+
+        input_cem_dim = embedding_dim * n_concepts
+        for _ in range(post_cem_layers):  # Two layers to map CEM output to latent space
+            self.post_cem_fc.append(
+                nn.Sequential(
+                    nn.Linear(input_cem_dim,latent_dim),
+                    nn.ReLU()
+                )
+            )
+            input_cem_dim = latent_dim
+            
+        self.post_cem_fc = nn.Sequential(*self.post_cem_fc)
+
+    def encode(self, input: Tensor) -> List[Tensor]:
+        """
+        Encodes the input by passing through the encoder network
+        and returns the latent codes.
+        :param input: (Tensor) Input tensor to encoder [N x C x H x W]
+        :return: (Tensor) List of latent codes
+        """
+        result = self.encoder(input)
+        result = torch.flatten(result, start_dim=1)
+
+        # Split the result into mu and var components
+        # of the latent Gaussian distribution
+        mu = self.fc_mu(result)
+        log_var = self.fc_var(result)
+
+        return [mu, log_var]
+
+    def decode(self, z: Tensor,interventions = None) -> Tensor:
+        if interventions is  None:
+            cem_embeddings, concepts = self.cem_model(z)
+            z = self.post_cem_fc(cem_embeddings)
+        else:
+            cem_embeddings, concepts = self.cem_model(z,interventions=interventions)
+            z = self.post_cem_fc(cem_embeddings)
+          
+        result = self.decoder_input(z)
+        result = result.view(-1, 512, 2, 2)
+        result = self.decoder(result)
+        result = self.final_layer(result)
+        return result , concepts
+
+    def reparameterize(self, mu: Tensor, logvar: Tensor) -> Tensor:
+        """
+        Will a single z be enough ti compute the expectation
+        for the loss??
+        :param mu: (Tensor) Mean of the latent Gaussian
+        :param logvar: (Tensor) Standard deviation of the latent Gaussian
+        :return:
+        """
+        std = torch.exp(0.5 * logvar)
+        eps = torch.randn_like(std)
+        return eps * std + mu
+
+    def forward(self, input: Tensor, interventions=None, **kwargs) -> Tensor:
+        mu, log_var = self.encode(input)
+        z = self.reparameterize(mu, log_var)
+        if interventions is None:
+            reconstructed, concepts = self.decode(z)
+        else:
+            reconstructed, concepts = self.decode(z, interventions=interventions)
+        return  [reconstructed, input, mu, log_var, concepts]
+
+    def loss_function(self,
+                      *args,
+                      **kwargs) -> dict:
+        self.num_iter += 1
+        recons = args[0]
+        input = args[1]
+        mu = args[2]
+        log_var = args[3]
+        concepts = args[4]
+        labels = None
+        internventions = None
+
+        if 'labels' in kwargs:
+            labels = kwargs['labels']
+        
+        if 'interventions' in kwargs:
+       
+            internventions = kwargs['interventions']
+
+        #compote loss between predicted concepts and true concepts if labels are provided continues 
+        if labels is not None:
+            concept_loss = F.mse_loss(concepts, labels)
+        if internventions is not None:
+            concept_loss = F.mse_loss(concepts, internventions)
+
+        if labels is None and internventions is None:
+            #warning 
+            concept_loss = torch.tensor(0.0).to(input.device)
+      
+
+        kld_weight = kwargs['M_N']  # Account for the minibatch samples from the dataset
+
+        recons_loss =F.mse_loss(recons, input)
+
+        kld_loss = torch.mean(-0.5 * torch.sum(1 + log_var - mu ** 2 - log_var.exp(), dim = 1), dim = 0)
+
+        if self.loss_type == 'H': # https://openreview.net/forum?id=Sy2fzU9gl
+            loss = recons_loss + self.beta * kld_weight * kld_loss + concept_loss
+        elif self.loss_type == 'B': # https://arxiv.org/pdf/1804.03599.pdf
+            self.C_max = self.C_max.to(input.device)
+            C = torch.clamp(self.C_max/self.C_stop_iter * self.num_iter, 0, self.C_max.data[0])
+            loss = recons_loss + self.gamma * kld_weight* (kld_loss - C).abs() + concept_loss
+        else:
+            raise ValueError('Undefined loss type.')
+
+        return {'loss': loss, 'Reconstruction_Loss':recons_loss, 'KLD':kld_loss, 'Concept_Loss': concept_loss}
+
+    def sample(self,
+               num_samples:int,
+               current_device: int, **kwargs) -> Tensor:
+        """
+        Samples from the latent space and return the corresponding
+        image space map.
+        :param num_samples: (Int) Number of samples
+        :param current_device: (Int) Device to run the model
+        :return: (Tensor)
+        """
+        z = torch.randn(num_samples,
+                        self.latent_dim)
+
+        z = z.to(current_device)
+
+        samples = self.decode(z)
+        return samples[0]
+
+    def generate(self, x: Tensor, **kwargs) -> Tensor:
+        """
+        Given an input image x, returns the reconstructed image
+        :param x: (Tensor) [B x C x H x W]
+        :return: (Tensor) [B x C x H x W]
+        """
+
+        return self.forward(x)[0]
+    
+# --- Test Block ---
+if __name__ == "__main__":
+    batch_size = 4
+    n_concepts = 3
+    input_dim_param = 128  # Raw input features (including space for concepts)
+
+    embedding_dim = 16
+
+    # Input x: [batch, features_per_concept, n_concepts]
+    x = torch.randn(batch_size, input_dim_param)
+
+
+    cem_model = CEM(input_dim=input_dim_param, n_concepts=n_concepts, embedding_dim=embedding_dim)
+
+    embeddings, concepts = cem_model(x)
+
+    print(f"Input shape:     {x.shape}")          # Expected: [4, 7, 3]
+    print(f"Embeddings shape: {embeddings.shape}") # Expected: [4, 48] (3 concepts * 16 dim)
+    print(f"Concepts shape:   {concepts.shape}")   # Expected: [4, 3]
+    print("concepts :", concepts)
+
+    # Testing CBMVAE
+    vae = CBMVAE(in_channels=3, latent_dim=128, n_concepts=n_concepts, input_dim_param=input_dim_param)
+    fake_image = torch.randn(batch_size, 3, 64, 64)
+    reconstructed, input_img, mu, log_var, pred_concepts = vae(fake_image)
+    print(f"Input image shape: {fake_image.shape}")
+    print(f"Reconstructed image shape: {reconstructed.shape}")
+    print(f"Latent mean shape: {mu.shape}")
+    print(f"Latent logvar shape: {log_var.shape}")
+    print(f"Predicted concepts shape: {pred_concepts.shape}")
+
+    # Compute loss
+    true_concepts = torch.randn(batch_size, n_concepts)
+    loss_dict = vae.loss_function(reconstructed, input_img, mu, log_var, pred_concepts, labels=true_concepts, M_N=1.0)
+    print("Loss components:", loss_dict)    

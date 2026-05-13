@@ -1,1 +1,1 @@
-from .cem import ConceptBottleneck
+from .cem import CEM

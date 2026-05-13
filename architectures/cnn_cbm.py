@@ -9,20 +9,26 @@ Returns (logits/preds, concepts) so concept values can be logged or supervised.
 """
 
 import torch.nn as nn
+from typing import Union
 from cbmc import ContinuousBottleneck
-from cbmc.configs import CNNConfig, CBMConfig
+from cbmc.configs import CNNConfig, CNNRegressionConfig, CBMConfig
 
 
 class CNNwithCBM(nn.Module):
-    def __init__(self, backbone_cfg: CNNConfig, cbm_cfg: CBMConfig, n_outputs: int = None):
+    def __init__(self, backbone_cfg: Union[CNNConfig, CNNRegressionConfig], cbm_cfg: CBMConfig, n_outputs: int = None):
         """
         Args:
-            backbone_cfg : CNN encoder config
+            backbone_cfg : CNN encoder config (CNNConfig or CNNRegressionConfig)
             cbm_cfg      : concept bottleneck config
-            n_outputs    : head output size. Defaults to backbone_cfg.n_classes.
+            n_outputs    : head output size. Required when using CNNRegressionConfig.
         """
         super().__init__()
-        n_out = n_outputs if n_outputs is not None else backbone_cfg.n_classes
+        if n_outputs is not None:
+            n_out = n_outputs
+        elif hasattr(backbone_cfg, 'n_classes'):
+            n_out = backbone_cfg.n_classes
+        else:
+            n_out = backbone_cfg.n_outputs
 
         # Encoder: same conv stack as CNNBaseline
         layers = []
@@ -39,9 +45,18 @@ class CNNwithCBM(nn.Module):
         self.cbm  = ContinuousBottleneck(in_dim=enc_out, n_concepts=cbm_cfg.n_concepts)
 
         # Head: n_concepts → task output
-        self.head = nn.Linear(cbm_cfg.n_concepts, n_out)
+        # the head should also be a stack of layers
+        head_layers = []
+        in_features = cbm_cfg.n_concepts
+        for out_features in cbm_cfg.head_channels:
+            head_layers += [nn.Linear(in_features, out_features), nn.ReLU()]
+            in_features = out_features
+        head_layers += [nn.Linear(in_features, n_out)]
+        self.head = nn.Sequential(*head_layers)
 
-    def forward(self, x):
+    def forward(self, x, interventions=None):
         z        = self.encoder(x)
-        concepts = self.cbm(z)           # (B, n_concepts)
+        concepts = self.cbm(z)                                    # (B, n_concepts)
+        if interventions is not None:
+            concepts = interventions
         return self.head(concepts), concepts

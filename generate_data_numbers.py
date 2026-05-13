@@ -89,12 +89,12 @@ class ArithmeticMNISTDataset(Dataset):
         elif op == '-':
             result = a - b
             flags = [0, 1, 0, 0]
-        elif op == 'x':
+        """elif op == 'x':
             result = a * b
             flags = [0, 0, 1, 0]
         elif op == '/':
             result = a / b
-            flags = [0, 0, 0, 1]
+            flags = [0, 0, 0, 1]"""
 
         # Make a canvas to paste digits + operator
         canvas = Image.new("L", (84, 28), color=255)  # wide canvas
@@ -145,6 +145,21 @@ if __name__ == "__main__":
     dataset = ArithmeticMNISTDataset(mnist_root=DATA_PATH, num_samples=10, img_size=224, operators=('x', '/'))
     root = f"{HOME}/figs/mnist_arithmetic_examples"
     os.makedirs(root, exist_ok=True)
-    for idx in range(10):
+    """for idx in range(1000):
         x, c, y = dataset[idx]
         plot_sample(x, c, y, root, idx)
+    """
+    # plot the distribution of results in the dataset
+    results = []
+    for idx in range(len(dataset)):
+        _, _, y = dataset[idx]
+        results.append(y.item())
+        #plotting the count not he frequency
+    # count unique numbers in results
+    unique, counts = np.unique(results, return_counts=True)
+    print(len(results), len(unique), len(counts))
+    plt.bar(unique, counts)
+    plt.xlabel("Result")
+    plt.ylabel("Frequency")
+    plt.savefig(f"{root}/result_distribution.pdf")
+    plt.show()  

@@ -5,9 +5,9 @@ Continuous Concept Bottleneck block based on the Concept Embedding Model (CEM).
 
 Drop this anywhere in your architecture:
 
-    from concepts import ConceptBottleneck
+    from concepts import CEM
 
-    cbm = ConceptBottleneck(
+    cbm = CEM(
         input_dim   = 128,      # dim of the pre-concept embedding coming from your backbone
         n_concepts  = 8,        # how many concepts to model
         embedding_dim = 16,     # dim of each pos/neg concept embedding
@@ -107,7 +107,7 @@ class _ConceptPredictor(nn.Module):
 # Public API
 # ---------------------------------------------------------------------------
 
-class ConceptBottleneck(nn.Module):
+class CEM(nn.Module):
     """
     Continuous Concept Bottleneck block.
 
@@ -153,7 +153,7 @@ class ConceptBottleneck(nn.Module):
 
     Example
     -------
-    >>> cbm = ConceptBottleneck(input_dim=128, n_concepts=8, embedding_dim=16)
+    >>> cbm = CEM(input_dim=128, n_concepts=8, embedding_dim=16)
     >>> z = torch.randn(32, 128)
     >>> embeddings, concepts = cbm(z)
     >>> embeddings.shape
@@ -203,6 +203,10 @@ class ConceptBottleneck(nn.Module):
             dropout=dropout,
         )
 
+        # Normalize embeddings before they reach the decoder — pos/neg MLPs
+        # have no output activation so their scale grows during training.
+        self.output_norm = nn.LayerNorm(self.embedding_dim * n_concepts)
+
     # ------------------------------------------------------------------
     @property
     def output_dim(self) -> int:
@@ -245,22 +249,42 @@ class ConceptBottleneck(nn.Module):
             blend_scores = predicted_concepts
         else:
             if intervention_mask is None:
-                # Full intervention: override all concepts
                 blend_scores = interventions
             else:
-                # Partial intervention: mix predicted and provided per concept
                 blend_scores = (
                     intervention_mask * interventions
                     + (1.0 - intervention_mask) * predicted_concepts
                 )
 
+        # tanh squashes any concept scale into (-1,1) so the blend gate
+        # w = clamp(score*0.5+0.5, 0,1) never fully saturates, keeping
+        # reconstruction gradients flowing back through the gate.
+        blend_scores = torch.tanh(blend_scores)
+
         # 4. Blend pos/neg embeddings using gated weights
         final_embeddings = self._blend(pos, neg, blend_scores)  # [B, E, C]
 
-        # 5. Flatten to [B, E * C] for downstream modules
-        final_embeddings_flat = final_embeddings.view(x.size(0), -1)
+        # 5. Flatten and normalize before passing to decoder
+        final_embeddings_flat = self.output_norm(final_embeddings.view(x.size(0), -1))
 
         return final_embeddings_flat, predicted_concepts
+
+    # ------------------------------------------------------------------
+    def sample(self, z: torch.Tensor, score_clamp: float = 1.0) -> torch.Tensor:
+        """
+        Generate CEM embeddings for prior sampling.
+
+        Unlike forward(), concept scores are clamped to [-score_clamp, score_clamp]
+        so the blending gate never saturates on out-of-distribution z samples
+        (which would produce all-positive or all-negative embeddings and garbage output).
+
+        Returns flat embeddings [B, embedding_dim * n_concepts].
+        """
+        pos, neg = self.embedding_bank(z)
+        combined = torch.cat([pos, neg], dim=1)
+        scores   = torch.tanh(self.concept_predictor(combined))
+        blended  = self._blend(pos, neg, scores)
+        return blended.view(z.size(0), -1)
 
 
 # ---------------------------------------------------------------------------
@@ -271,7 +295,7 @@ if __name__ == "__main__":
 
     B, D, C, E = 8, 128, 6, 16
 
-    cbm = ConceptBottleneck(input_dim=D, n_concepts=C, embedding_dim=E)
+    cbm = CEM(input_dim=D, n_concepts=C, embedding_dim=E)
     print(cbm)
     print(f"\noutput_dim property : {cbm.output_dim}")  # 96
 

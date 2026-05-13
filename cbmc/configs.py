@@ -84,6 +84,9 @@ class VAEConfig(BaseConfig):
 class CBMConfig(BaseConfig):
     """Scalar concept bottleneck — one learned scalar per concept (linear probe)."""
     n_concepts:  int   = 8
+    head_channels: List[int] = field(default_factory=lambda: [16,16])  # head MLP layers after bottleneck
+
+
 
 
 @dataclass
@@ -128,8 +131,14 @@ class CNNRegressionConfig(BaseConfig):
 
 @dataclass
 class TrainConfig(BaseConfig):
-    epochs:      int   = 10
-    lr:          float = 1e-3
-    batch_size:  int   = 128
-    seed:        int   = 42
-    num_workers: int   = 2
+    epochs:            int   = 20
+    lr:                float = 1e-3
+    batch_size:        int   = 128
+    seed:              int   = 42
+    num_workers:       int   = 2
+    # Concept supervision: weight of concept MSE loss added to task loss.
+    # Set to 0.0 to disable (baseline/no-concept experiments ignore this).
+    concept_weight:    float = 0.0
+    # Intervention probability: fraction of batches where true concepts are
+    # injected instead of predicted ones. 0.0 = never, 1.0 = always.
+    intervention_prob: float = 0.0

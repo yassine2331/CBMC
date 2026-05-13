@@ -13,20 +13,26 @@ Supports test-time interventions via the `interventions` and `mask` arguments.
 """
 
 import torch.nn as nn
-from cbmc.concepts import ConceptBottleneck
-from cbmc.configs import CNNConfig, CEMConfig
+from typing import Union
+from cbmc.concepts import CEM
+from cbmc.configs import CNNConfig, CNNRegressionConfig, CEMConfig
 
 
 class CNNwithCEM(nn.Module):
-    def __init__(self, backbone_cfg: CNNConfig, cem_cfg: CEMConfig, n_outputs: int = None):
+    def __init__(self, backbone_cfg: Union[CNNConfig, CNNRegressionConfig], cem_cfg: CEMConfig, n_outputs: int = None):
         """
         Args:
-            backbone_cfg : CNN encoder config
+            backbone_cfg : CNN encoder config (CNNConfig or CNNRegressionConfig)
             cem_cfg      : CEM config
-            n_outputs    : head output size. Defaults to backbone_cfg.n_classes.
+            n_outputs    : head output size. Required when using CNNRegressionConfig.
         """
         super().__init__()
-        n_out = n_outputs if n_outputs is not None else backbone_cfg.n_classes
+        if n_outputs is not None:
+            n_out = n_outputs
+        elif hasattr(backbone_cfg, 'n_classes'):
+            n_out = backbone_cfg.n_classes
+        else:
+            n_out = backbone_cfg.n_outputs
 
         # Encoder
         layers = []
@@ -40,7 +46,7 @@ class CNNwithCEM(nn.Module):
         enc_out = backbone_cfg.conv_channels[-1]
 
         # CEM
-        self.cem = ConceptBottleneck(
+        self.cem = CEM(
             input_dim     = enc_out,
             n_concepts    = cem_cfg.n_concepts,
             embedding_dim = cem_cfg.embedding_dim,

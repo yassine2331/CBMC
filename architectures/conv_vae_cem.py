@@ -1,6 +1,6 @@
 """
-MLP VAE + Concept Embedding Model for ArithmeticMNIST.
-Flow: image → MLPEncoder → (mu, log_var) → z → CEM → (embeddings, concepts) → MLPDecoder → recon
+ConvVAE + Concept Embedding Model for Pendulum.
+Flow: image → ConvEncoder → (mu, log_var) → z → CEM → (embeddings, concepts) → ConvDecoder → recon
 Returns (recon, concepts, mu, log_var).
 """
 
@@ -8,16 +8,16 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from cbmc.concepts import CEM
-from cbmc.configs import VAEConfig, CEMConfig
-from architectures.backbone import MLPEncoder, MLPDecoder
+from cbmc.configs import ConvVAEConfig, CEMConfig
+from architectures.backbone import ConvEncoder, ConvDecoder
 
 
-class VAEwithCEM(nn.Module):
-    def __init__(self, backbone_cfg: VAEConfig, cem_cfg: CEMConfig):
+class ConvVAEwithCEM(nn.Module):
+    def __init__(self, backbone_cfg: ConvVAEConfig, cem_cfg: CEMConfig):
         super().__init__()
         self.backbone_cfg = backbone_cfg
         self.cem_cfg      = cem_cfg
-        self.encoder      = MLPEncoder(backbone_cfg)
+        self.encoder      = ConvEncoder(backbone_cfg)
         self.cem          = CEM(
             input_dim     = backbone_cfg.latent_dim,
             n_concepts    = cem_cfg.n_concepts,
@@ -26,26 +26,24 @@ class VAEwithCEM(nn.Module):
             depth         = cem_cfg.depth,
             dropout       = cem_cfg.dropout,
         )
-        self.decoder = MLPDecoder(backbone_cfg, bottleneck_dim=self.cem.output_dim)
+        self.decoder = ConvDecoder(backbone_cfg, bottleneck_dim=self.cem.output_dim)
 
     def reparameterize(self, mu, log_var):
         std = torch.exp(0.5 * log_var)
         return mu + std * torch.randn_like(std)
 
-    def decode(self, embeddings, shape=None):
-        out = self.decoder(embeddings).reconstruction
-        return out.view(embeddings.size(0), *(shape or (self.backbone_cfg.input_dim,)))
+    def decode(self, embeddings):
+        return self.decoder(embeddings).reconstruction
 
     def forward(self, x, interventions=None, mask=None):
         enc                  = self.encoder(x)
         z                    = self.reparameterize(enc.embedding, enc.log_covariance)
         embeddings, concepts = self.cem(z, interventions, mask)
-        recon                = self.decoder(embeddings).reconstruction.view(x.shape)
+        recon                = self.decoder(embeddings).reconstruction
         return recon, concepts, enc.embedding, enc.log_covariance
 
 
-def vae_cem_loss(recon, x, mu, log_var, kl_weight=1.0):
-    x_01       = (x * 0.3081 + 0.1307).clamp(0, 1)
-    recon_loss = F.binary_cross_entropy(recon, x_01, reduction="sum") / x.size(0)
+def conv_vae_cem_loss(recon, x, mu, log_var, kl_weight=1.0):
+    recon_loss = F.mse_loss(recon, x, reduction="sum") / x.size(0)
     kl         = -0.5 * (1 + log_var - mu.pow(2) - log_var.exp()).sum(1).mean()
     return recon_loss + kl_weight * kl, recon_loss, kl

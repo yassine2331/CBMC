@@ -1,5 +1,5 @@
 {
-  "n_concepts": 10,
+  "n_concepts": 2,
   "embedding_dim": 16,
   "hidden_dim": 64,
   "depth": 2,

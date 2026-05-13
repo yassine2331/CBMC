@@ -1,9 +1,14 @@
 """
 Pendulum dataset loader.
 Images are 96x96 RGBA PNGs. Labels are encoded in the filename:
-    a_<v0>_<v1>_<v2>_<v3>.png  →  4 continuous regression targets
+    a_<v0>_<v1>_<v2>_<v3>.png  →  4 continuous values
 
-Targets are z-score normalized per-dimension using training set statistics.
+Returns (image, concepts, target) where:
+    image    : (4, img_size, img_size) RGBA tensor
+    concepts : (4,) float tensor — the 4 physical values (same as target)
+    target   : (4,) float tensor — same as concepts (physical values ARE the task)
+
+label_mean and label_std are returned for normalizing targets during training.
 """
 
 import os
@@ -34,10 +39,12 @@ class PendulumDataset(Dataset):
         return len(self.files)
 
     def __getitem__(self, idx):
-        img = Image.open(os.path.join(self.root, self.files[idx])).convert("RGBA")
+        img = Image.open(os.path.join(self.root, self.files[idx])).convert("RGB")
         if self.transform:
             img = self.transform(img)
-        return img, self.labels[idx]
+        concepts = self.labels[idx]
+        target   = self.labels[idx]   # concepts == target for pendulum
+        return img, concepts, target
 
 
 def get_pendulum(
