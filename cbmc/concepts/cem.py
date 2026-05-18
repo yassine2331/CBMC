@@ -288,6 +288,166 @@ class CEM(nn.Module):
 
 
 # ---------------------------------------------------------------------------
+# Single-embedding CEM variants
+# ---------------------------------------------------------------------------
+
+class _SingleEmbeddingBank(nn.Module):
+    """One embedding MLP per concept: φᵢ(x) → ℝ^embedding_dim."""
+
+    def __init__(self, input_dim: int, n_concepts: int,
+                 hidden_dim: int, embedding_dim: int,
+                 depth: int, dropout: float) -> None:
+        super().__init__()
+        self.nets = nn.ModuleList([
+            _mlp(input_dim, hidden_dim, embedding_dim, depth, dropout)
+            for _ in range(n_concepts)
+        ])
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return torch.stack([net(x) for net in self.nets], dim=2)  # [B, E, C]
+
+
+class _SingleConceptPredictor(nn.Module):
+    """Predict a scalar concept score from a single embedding."""
+
+    def __init__(self, n_concepts: int, embedding_dim: int,
+                 hidden_dim: int, depth: int, dropout: float) -> None:
+        super().__init__()
+        self.nets = nn.ModuleList([
+            _mlp(embedding_dim, hidden_dim, 1, depth, dropout)
+            for _ in range(n_concepts)
+        ])
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: [B, E, C]
+        return torch.cat([net(x[:, :, i]) for i, net in enumerate(self.nets)], dim=1)  # [B, C]
+
+
+class CEMTanh(nn.Module):
+    """
+    Single-embedding CEM variant.
+
+    One embedding φᵢ(x) per concept. The concept score cᵢ is predicted from
+    that embedding and then used as a gate:
+
+        output_i = tanh(cᵢ) · φᵢ(x)
+
+    This keeps the gate bounded in (-1, 1), preserving the sign information
+    of the concept but avoiding unbounded scaling.
+
+    Inputs / outputs match the CEM interface exactly so it is a drop-in swap.
+    """
+
+    def __init__(
+        self,
+        input_dim: int,
+        n_concepts: int,
+        embedding_dim: int = 16,
+        hidden_dim: int = 64,
+        depth: int = 2,
+        dropout: float = 0.2,
+    ) -> None:
+        super().__init__()
+        self.input_dim = input_dim
+        self.n_concepts = n_concepts
+        self.embedding_dim = embedding_dim
+
+        self.embedding_bank = _SingleEmbeddingBank(
+            input_dim, n_concepts, hidden_dim, embedding_dim, depth, dropout)
+        self.concept_predictor = _SingleConceptPredictor(
+            n_concepts, embedding_dim, hidden_dim, depth, dropout)
+        self.output_norm = nn.LayerNorm(embedding_dim * n_concepts)
+
+    @property
+    def output_dim(self) -> int:
+        return self.embedding_dim * self.n_concepts
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        interventions: Optional[torch.Tensor] = None,
+        intervention_mask: Optional[torch.Tensor] = None,
+    ):
+        emb = self.embedding_bank(x)                 # [B, E, C]
+        predicted_concepts = self.concept_predictor(emb)  # [B, C]
+
+        if interventions is None:
+            scores = predicted_concepts
+        elif intervention_mask is None:
+            scores = interventions
+        else:
+            scores = (intervention_mask * interventions
+                      + (1.0 - intervention_mask) * predicted_concepts)
+
+        gate = torch.tanh(scores).unsqueeze(1)       # [B, 1, C]
+        scaled = gate * emb                          # [B, E, C]
+        flat = self.output_norm(scaled.view(x.size(0), -1))
+        return flat, predicted_concepts
+
+
+class CEMLinear(nn.Module):
+    """
+    Single-embedding CEM variant.
+
+    One embedding φᵢ(x) per concept. The concept score cᵢ is predicted from
+    that embedding and used directly as a linear gate (no activation):
+
+        output_i = cᵢ · φᵢ(x)
+
+    The gate is unbounded; LayerNorm at the output stabilizes the scale before
+    the downstream head.
+
+    Inputs / outputs match the CEM interface exactly so it is a drop-in swap.
+    """
+
+    def __init__(
+        self,
+        input_dim: int,
+        n_concepts: int,
+        embedding_dim: int = 16,
+        hidden_dim: int = 64,
+        depth: int = 2,
+        dropout: float = 0.2,
+    ) -> None:
+        super().__init__()
+        self.input_dim = input_dim
+        self.n_concepts = n_concepts
+        self.embedding_dim = embedding_dim
+
+        self.embedding_bank = _SingleEmbeddingBank(
+            input_dim, n_concepts, hidden_dim, embedding_dim, depth, dropout)
+        self.concept_predictor = _SingleConceptPredictor(
+            n_concepts, embedding_dim, hidden_dim, depth, dropout)
+        self.output_norm = nn.LayerNorm(embedding_dim * n_concepts)
+
+    @property
+    def output_dim(self) -> int:
+        return self.embedding_dim * self.n_concepts
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        interventions: Optional[torch.Tensor] = None,
+        intervention_mask: Optional[torch.Tensor] = None,
+    ):
+        emb = self.embedding_bank(x)                 # [B, E, C]
+        predicted_concepts = self.concept_predictor(emb)  # [B, C]
+
+        if interventions is None:
+            scores = predicted_concepts
+        elif intervention_mask is None:
+            scores = interventions
+        else:
+            scores = (intervention_mask * interventions
+                      + (1.0 - intervention_mask) * predicted_concepts)
+
+        gate = scores.unsqueeze(1)                   # [B, 1, C]
+        scaled = gate * emb                          # [B, E, C]
+        flat = self.output_norm(scaled.view(x.size(0), -1))
+        return flat, predicted_concepts
+
+
+# ---------------------------------------------------------------------------
 # Quick smoke-test
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":

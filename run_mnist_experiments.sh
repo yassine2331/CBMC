@@ -24,7 +24,7 @@
 EPOCHS=20              # training epochs per experiment
 DEVICE="mps"          # cuda | mps | cpu
 OPERATORS="+ x"        # arithmetic operators to use: + - x /
-
+RUNS=5                 # number of runs per experiment (for averaging)
 DIGITS_SINGLE="9"              # condition 1: single digit
 DIGITS_ALL="1 2 3 4 5 6 7 8 9" # condition 2: all digits
 
@@ -71,7 +71,8 @@ run_exp () {
         --device   "$DEVICE"         \
         --operators $OPERATORS       \
         --digits   $digits           \
-        --tag      "$tag"
+        --tag      "$tag"            \
+        --runs     "$RUNS"
 
     echo "  -> saved to outputs/results/${name}_${tag}.csv"
 }
@@ -91,6 +92,14 @@ run_exp  exp_cbm_cls_mnist  all_digits   "$DIGITS_ALL"
 # ── 3. CEM (Concept Embedding Model) ─────────────────────────
 run_exp  exp_cem_cls_mnist  digit9       "$DIGITS_SINGLE"
 run_exp  exp_cem_cls_mnist  all_digits   "$DIGITS_ALL"
+
+# ── 4. CEM-Tanh (single embedding, tanh gate) ────────────────
+run_exp  exp_cem_tanh_cls_mnist  digit9       "$DIGITS_SINGLE"
+run_exp  exp_cem_tanh_cls_mnist  all_digits   "$DIGITS_ALL"
+
+# ── 5. CEM-Linear (single embedding, identity gate) ──────────
+run_exp  exp_cem_linear_cls_mnist  digit9       "$DIGITS_SINGLE"
+run_exp  exp_cem_linear_cls_mnist  all_digits   "$DIGITS_ALL"
 
 # ============================================================
 #  Summary

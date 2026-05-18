@@ -1,1 +1,1 @@
-from .cem import CEM
+from .cem import CEM, CEMTanh, CEMLinear

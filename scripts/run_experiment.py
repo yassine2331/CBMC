@@ -62,6 +62,7 @@ from architectures.cnn_cbm import CNNwithCBM
 from architectures.cnn_cem import CNNwithCEM
 from architectures.conv_vae_cbm import ConvVAEwithCBM, conv_vae_cbm_loss
 from architectures.conv_vae_cem import ConvVAEwithCEM, conv_vae_cem_loss
+from architectures.cnn_cem_scaled import CNNwithCEMTanh, CNNwithCEMLinear
 
 
 def conv_vae_mnist_loss(recon, x, mu, log_var, kl_weight=1.0):
@@ -769,6 +770,94 @@ def exp_cem_cls_pendulum(device, *, epochs=None, operators=None, digits=None, se
     return test_mse, concept_mse, intervention_mse, test_map/len(test_loader)
 
 # ---------------------------------------------------------------------------
+# Single-embedding CEM variants (tanh and linear gates)
+# ---------------------------------------------------------------------------
+
+def _exp_scaled_cem_cls_mnist(model_cls, exp_name, device, *,
+                               epochs=None, operators=None, digits=None,
+                               seed=None, tag=None):
+    """Shared runner for CEMTanh and CEMLinear on ArithmeticMNIST."""
+    print(f"\n=== [{exp_name}] Scaled-CEM Regression — ArithmeticMNIST ===")
+    backbone_cfg = CNNRegressionConfig.load("experiments/configs/exp_cem_cls_mnist_backbone.json")
+    cem_cfg      = CEMConfig.load("experiments/configs/cem_mnist.json")
+    train_cfg    = TrainConfig.load("experiments/configs/train_cem_mnist.json")
+    set_seed(seed if seed is not None else train_cfg.seed)
+    n_epochs = epochs if epochs is not None else train_cfg.epochs
+
+    train_loader, test_loader = get_arithmetic_mnist(
+        batch_size=train_cfg.batch_size, num_workers=train_cfg.num_workers,
+        operators=operators or ('+', 'x'), digits=digits,
+    )
+    model     = model_cls(backbone_cfg, cem_cfg, n_outputs=backbone_cfg.n_outputs).to(device)
+    optimizer = optim.Adam(model.parameters(), lr=train_cfg.lr)
+    criterion = nn.MSELoss()
+    rows = []
+
+    for epoch in range(1, n_epochs + 1):
+        model.train()
+        total_task_loss = 0
+        pbar = tqdm(train_loader, desc=f"  Epoch {epoch}/{n_epochs}", leave=False)
+        for x, c_true, y in pbar:
+            x, c_true, y = x.to(device), c_true.to(device), y.to(device).unsqueeze(1)
+            c_norm = (c_true - MNIST_CONCEPT_MEAN) / MNIST_CONCEPT_SCALE
+            if random.random() < train_cfg.intervention_prob:
+                preds, concepts = model(x, interventions=c_norm)
+            else:
+                preds, concepts = model(x)
+            task_loss    = criterion(preds, y)
+            concept_loss = F.mse_loss(concepts, c_norm)
+            loss = task_loss + train_cfg.concept_weight * concept_loss
+            optimizer.zero_grad(); loss.backward(); optimizer.step()
+            total_task_loss += task_loss.item()
+            pbar.set_postfix(mse=f"{task_loss.item():.4f}", c_loss=f"{concept_loss.item():.3f}")
+        train_mse = total_task_loss / len(train_loader)
+        print(f"  Epoch {epoch}/{n_epochs}  mse={train_mse:.4f}")
+        rows.append([epoch, f"{train_mse:.6f}"])
+
+    model.eval()
+    test_mse = concept_mse = intervention_mse = test_map = 0
+    with torch.no_grad():
+        for x, c_true, y in test_loader:
+            x, c_true, y = x.to(device), c_true.to(device), y.to(device).unsqueeze(1)
+            c_norm = (c_true - MNIST_CONCEPT_MEAN) / MNIST_CONCEPT_SCALE
+            preds, concepts = model(x)
+            test_mse      += criterion(preds, y).item()
+            concept_mse   += F.mse_loss(concepts, c_norm).item()
+            test_map      += (preds - y).abs().mean().item()
+            preds_interv, _ = model(x, interventions=c_norm)
+            intervention_mse += criterion(preds_interv, y).item()
+
+    n = len(test_loader)
+    test_mse /= n; concept_mse /= n; intervention_mse /= n
+    print(f"  Test MSE: {test_mse:.4f}")
+    print(f"  Concept MSE: {concept_mse:.4f}")
+    print(f"  Intervention MSE: {intervention_mse:.4f}")
+    print(f"  Test MAP: {test_map:.4f}")
+    rows.append(["test", f"{test_mse:.6f}"])
+
+    _tag = f"_{tag}" if tag else ""
+    save_csv(f"outputs/results/{exp_name}{_tag}.csv", rows, ["epoch", "mse"])
+    backbone_cfg.save(f"outputs/{exp_name}{_tag}/backbone_config.json")
+    cem_cfg.save(f"outputs/{exp_name}{_tag}/cem_config.json")
+    train_cfg.save(f"outputs/{exp_name}{_tag}/train_config.json")
+    return test_mse, concept_mse, intervention_mse, test_map / n
+
+
+def exp_cem_tanh_cls_mnist(device, *, epochs=None, operators=None, digits=None, seed=None, tag=None):
+    return _exp_scaled_cem_cls_mnist(
+        CNNwithCEMTanh, "exp_cem_tanh_cls_mnist", device,
+        epochs=epochs, operators=operators, digits=digits, seed=seed, tag=tag,
+    )
+
+
+def exp_cem_linear_cls_mnist(device, *, epochs=None, operators=None, digits=None, seed=None, tag=None):
+    return _exp_scaled_cem_cls_mnist(
+        CNNwithCEMLinear, "exp_cem_linear_cls_mnist", device,
+        epochs=epochs, operators=operators, digits=digits, seed=seed, tag=tag,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Sample helpers for concept models (VAE variants)
 # ---------------------------------------------------------------------------
 
@@ -817,9 +906,11 @@ import numpy as np
 
 def run_quantitative_suite(device, n_runs=5, epochs=None, operators=None, digits=None):
     quant_exps = [
-        "exp_cls_mnist",# "exp_cls_pendulum",
-        "exp_cbm_cls_mnist", #"exp_cbm_cls_pendulum",
-        "exp_cem_cls_mnist", #"exp_cem_cls_pendulum"
+        "exp_cls_mnist",            # "exp_cls_pendulum",
+        "exp_cbm_cls_mnist",        # "exp_cbm_cls_pendulum",
+        "exp_cem_cls_mnist",        # "exp_cem_cls_pendulum"
+        "exp_cem_tanh_cls_mnist",
+        "exp_cem_linear_cls_mnist",
     ]
     
     final_stats = {}
@@ -896,6 +987,9 @@ EXPERIMENTS = {
     "exp_cem_gen_pendulum":    exp_cem_gen_pendulum,
     "exp_cem_cls_mnist":       exp_cem_cls_mnist,
     "exp_cem_cls_pendulum":    exp_cem_cls_pendulum,
+    # Single-embedding CEM ablations
+    "exp_cem_tanh_cls_mnist":   exp_cem_tanh_cls_mnist,
+    "exp_cem_linear_cls_mnist": exp_cem_linear_cls_mnist,
 }
 
 def main():
@@ -944,7 +1038,39 @@ def main():
     )
 
     if args.exp:
-        EXPERIMENTS[args.exp](device, **kw)
+        if args.runs > 1:
+            results = []
+            for i in range(args.runs):
+                print(f"\n>>> Run {i+1}/{args.runs} for {args.exp}")
+                r = EXPERIMENTS[args.exp](device, **kw, seed=41 + i)
+                results.append(r)
+            task_mses     = [r if not isinstance(r, tuple) else r[0] for r in results]
+            concept_mses  = [r[1] for r in results if isinstance(r, tuple) and len(r) >= 2]
+            interv_mses   = [r[2] for r in results if isinstance(r, tuple) and len(r) >= 3]
+            test_maps     = [r[3] for r in results if isinstance(r, tuple) and len(r) >= 4]
+            def _stat(lst, label, key):
+                if not lst: return None, None
+                m, s = np.mean(lst), np.std(lst)
+                print(f"  {label}: {m:.6f} ± {s:.6f}")
+                return m, s
+            print(f"\nFinal Statistics for {args.exp}:")
+            stat_rows = []
+            for lst, label, key in [
+                (task_mses,    "Task MSE",          "task_mse"),
+                (concept_mses, "Concept MSE",       "concept_mse"),
+                (interv_mses,  "Intervention MSE",  "intervention_mse"),
+                (test_maps,    "Test MAP",          "test_map"),
+            ]:
+                m, s = _stat(lst, label, key)
+                if m is not None:
+                    stat_rows.append([key, f"{m:.6f}", f"{s:.6f}"])
+            _tag = f"_{args.tag}" if args.tag else ""
+            save_csv(
+                f"outputs/results/{args.exp}{_tag}_stats.csv",
+                stat_rows, ["metric", "mean", "std"],
+            )
+        else:
+            EXPERIMENTS[args.exp](device, **kw)
         print("\nAll done.")
     else:
         run_quantitative_suite(
