@@ -113,6 +113,26 @@ def load_cem_vae(checkpoint_dir, device=None):
 # Training
 # ---------------------------------------------------------------------------
 
+def _cycle_step(model, mu, c_target, optimizer):
+    """
+    Cycle loss backward: shuffle concepts → decode → re-encode → compare.
+    Encoder grads are zeroed so only the decoder and CEM embedding bank update.
+    Returns raw (unweighted) cycle loss value for logging.
+    """
+    emb_int, _ = model.cem(mu.detach(), interventions=c_target)
+    recon_int  = model.decode(emb_int)
+    enc_int    = model.encoder(recon_int)
+    _, c_hat   = model.cem(enc_int.embedding)
+    loss       = F.mse_loss(c_hat, c_target)
+    optimizer.zero_grad()
+    loss.backward()
+    for p in model.encoder.parameters():
+        if p.grad is not None:
+            p.grad.zero_()
+    optimizer.step()
+    return loss.item()
+
+
 def _cem_vae_loss_mnist(recon, x, mu, log_var, kl_weight):
     x_01       = (x * 0.3081 + 0.1307).clamp(0, 1)
     recon_loss = F.binary_cross_entropy(recon, x_01, reduction="sum") / x.size(0)
@@ -146,7 +166,7 @@ def train_mnist(device, epochs, out_dir):
     for epoch in range(1, n_epochs + 1):
         model.train()
         kl_w = min(epoch / kl_warmup, 1.0) * backbone_cfg.kl_weight
-        total_recon, total_kl, total_closs = 0.0, 0.0, 0.0
+        total_recon, total_kl, total_closs, total_cycle = 0.0, 0.0, 0.0, 0.0
         pbar = tqdm(train_loader, desc=f"  Epoch {epoch}/{n_epochs}", leave=False)
         for x, c_true, _ in pbar:
             x, c_true = x.to(device), c_true.to(device)
@@ -160,9 +180,17 @@ def train_mnist(device, epochs, out_dir):
             loss = loss + train_cfg.concept_weight * concept_loss
             optimizer.zero_grad(); loss.backward(); optimizer.step()
             total_recon += recon_l.item(); total_kl += kl.item(); total_closs += concept_loss.item()
-            pbar.set_postfix(recon=f"{recon_l.item():.2f}", kl=f"{kl.item():.2f}", c=f"{concept_loss.item():.3f}")
+            # cycle loss: shuffled target concepts → decode → re-encode → compare
+            # encoder grads are zeroed inside _cycle_step so only decoder+CEM update
+            cyc_l = 0.0
+            if train_cfg.cycle_weight > 0:
+                c_target = c_norm[torch.randperm(x.size(0), device=device)]
+                cyc_l = train_cfg.cycle_weight * _cycle_step(model, mu, c_target, optimizer)
+                total_cycle += cyc_l
+            pbar.set_postfix(recon=f"{recon_l.item():.2f}", kl=f"{kl.item():.2f}",
+                             c=f"{concept_loss.item():.3f}", cyc=f"{cyc_l:.3f}")
         n = len(train_loader)
-        print(f"  Epoch {epoch}/{n_epochs}  kl_w={kl_w:.2f}  recon={total_recon/n:.4f}  kl={total_kl/n:.4f}  c_mse={total_closs/n:.4f}")
+        print(f"  Epoch {epoch}/{n_epochs}  kl_w={kl_w:.2f}  recon={total_recon/n:.4f}  kl={total_kl/n:.4f}  c_mse={total_closs/n:.4f}  cyc={total_cycle/n:.4f}")
 
         model.eval()
         with torch.no_grad():
@@ -202,7 +230,7 @@ def train_pendulum(device, epochs, out_dir):
     for epoch in range(1, n_epochs + 1):
         model.train()
         kl_w = min(epoch / kl_warmup, 1.0) * backbone_cfg.kl_weight
-        total_recon, total_kl, total_closs = 0.0, 0.0, 0.0
+        total_recon, total_kl, total_closs, total_cycle = 0.0, 0.0, 0.0, 0.0
         pbar = tqdm(train_loader, desc=f"  Epoch {epoch}/{n_epochs}", leave=False)
         for x, c_true, _ in pbar:
             x, c_true = x.to(device), c_true.to(device)
@@ -216,9 +244,15 @@ def train_pendulum(device, epochs, out_dir):
             loss = loss + train_cfg.concept_weight * concept_loss
             optimizer.zero_grad(); loss.backward(); optimizer.step()
             total_recon += recon_l.item(); total_kl += kl.item(); total_closs += concept_loss.item()
-            pbar.set_postfix(recon=f"{recon_l.item():.2f}", kl=f"{kl.item():.2f}", c=f"{concept_loss.item():.3f}")
+            cyc_l = 0.0
+            if train_cfg.cycle_weight > 0:
+                c_target = c_norm[torch.randperm(x.size(0), device=device)]
+                cyc_l = train_cfg.cycle_weight * _cycle_step(model, mu, c_target, optimizer)
+                total_cycle += cyc_l
+            pbar.set_postfix(recon=f"{recon_l.item():.2f}", kl=f"{kl.item():.2f}",
+                             c=f"{concept_loss.item():.3f}", cyc=f"{cyc_l:.3f}")
         n = len(train_loader)
-        print(f"  Epoch {epoch}/{n_epochs}  kl_w={kl_w:.2f}  recon={total_recon/n:.4f}  kl={total_kl/n:.4f}  c_mse={total_closs/n:.4f}")
+        print(f"  Epoch {epoch}/{n_epochs}  kl_w={kl_w:.2f}  recon={total_recon/n:.4f}  kl={total_kl/n:.4f}  c_mse={total_closs/n:.4f}  cyc={total_cycle/n:.4f}")
 
         model.eval()
         with torch.no_grad():

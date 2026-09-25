@@ -133,7 +133,7 @@ class CNNRegressionConfig(BaseConfig):
 class TrainConfig(BaseConfig):
     epochs:            int   = 20
     lr:                float = 1e-3
-    batch_size:        int   = 128
+    batch_size:        int   = 256
     seed:              int   = 42
     num_workers:       int   = 2
     # Concept supervision: weight of concept MSE loss added to task loss.
@@ -142,3 +142,7 @@ class TrainConfig(BaseConfig):
     # Intervention probability: fraction of batches where true concepts are
     # injected instead of predicted ones. 0.0 = never, 1.0 = always.
     intervention_prob: float = 0.0
+    # Cycle loss weight: re-encode decoder output and penalise concept mismatch.
+    # Trains the decoder to actually change its output when concepts change.
+    # Encoder grads are zeroed after this backward so only decoder+CEM update.
+    cycle_weight:      float = 0.0

@@ -244,22 +244,20 @@ class CEM(nn.Module):
         combined = torch.cat([pos, neg], dim=1)              # [B, E*2, C]
         predicted_concepts = self.concept_predictor(combined)  # [B, C]
 
-        # 3. Determine the scores used for blending
+        # 3. Determine the scores used for blending.
+        # No tanh — concept supervision bounds predictions to c_norm ∈ [-1,1],
+        # so the blend gate w = clamp(score*0.5+0.5, 0,1) naturally spans [0,1].
+        # Applying tanh would compress everything to [0.12,0.88], weakening
+        # both model predictions and interventions equally.
         if interventions is None:
             blend_scores = predicted_concepts
+        elif intervention_mask is None:
+            blend_scores = interventions
         else:
-            if intervention_mask is None:
-                blend_scores = interventions
-            else:
-                blend_scores = (
-                    intervention_mask * interventions
-                    + (1.0 - intervention_mask) * predicted_concepts
-                )
-
-        # tanh squashes any concept scale into (-1,1) so the blend gate
-        # w = clamp(score*0.5+0.5, 0,1) never fully saturates, keeping
-        # reconstruction gradients flowing back through the gate.
-        blend_scores = torch.tanh(blend_scores)
+            blend_scores = (
+                intervention_mask * interventions
+                + (1.0 - intervention_mask) * predicted_concepts
+            )
 
         # 4. Blend pos/neg embeddings using gated weights
         final_embeddings = self._blend(pos, neg, blend_scores)  # [B, E, C]
@@ -282,7 +280,7 @@ class CEM(nn.Module):
         """
         pos, neg = self.embedding_bank(z)
         combined = torch.cat([pos, neg], dim=1)
-        scores   = torch.tanh(self.concept_predictor(combined))
+        scores   = self.concept_predictor(combined)
         blended  = self._blend(pos, neg, scores)
         return blended.view(z.size(0), -1)
 
