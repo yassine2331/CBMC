@@ -1,0 +1,8 @@
+Traceback (most recent call last):
+  File "/home/ouesly/CBMC/scripts/run_experiment.py", line 59, in <module>
+    from architectures.conv_vae_baseline import ConvVAEBaseline, conv_vae_loss
+  File "/home/ouesly/CBMC/scripts/../cbmc/data/../../architectures/conv_vae_baseline.py", line 11, in <module>
+    from architectures.backbone import ConvEncoder, ConvDecoder
+  File "/home/ouesly/CBMC/scripts/../cbmc/data/../../architectures/backbone.py", line 19, in <module>
+    from pythae.models.nn import BaseEncoder, BaseDecoder
+ModuleNotFoundError: No module named 'pythae'

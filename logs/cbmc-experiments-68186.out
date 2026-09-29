@@ -1,0 +1,10 @@
+========================================
+Job ID:    68186
+Host:      blas
+Start:     Fri Sep 25 16:50:00 CEST 2026
+Directory: /home/ouesly/CBMC
+========================================
+Running all 4 experiments sequentially via mamba run...
+Device: cuda
+
+>>> Run 1/5 for exp_gen_mnist

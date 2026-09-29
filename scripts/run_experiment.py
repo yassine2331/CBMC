@@ -115,11 +115,11 @@ def save_csv(path, rows, header):
 # Generation experiments — vanilla baselines
 # ---------------------------------------------------------------------------
 
-def exp_gen_mnist(device, *, epochs=None, operators=None, digits=None, tag=None):
+def exp_gen_mnist(device, *, epochs=None, operators=None, digits=None, seed=None, tag=None):
     print("\n=== [EXP 1] Generation — ArithmeticMNIST (ConvVAE) ===")
     model_cfg = ConvVAEConfig.load("experiments/configs/exp_gen_mnist.json")
     train_cfg = TrainConfig.load("experiments/configs/train_gen_mnist.json")
-    set_seed(train_cfg.seed)
+    set_seed(seed if seed is not None else train_cfg.seed)
     n_epochs = epochs if epochs is not None else train_cfg.epochs
 
     train_loader, test_loader = get_arithmetic_mnist(
@@ -151,11 +151,11 @@ def exp_gen_mnist(device, *, epochs=None, operators=None, digits=None, tag=None)
     train_cfg.save(f"outputs/exp_gen_mnist{_tag}/train_config.json")
 
 
-def exp_gen_pendulum(device, *, epochs=None, operators=None, digits=None, tag=None):
+def exp_gen_pendulum(device, *, epochs=None, operators=None, digits=None, seed=None, tag=None):
     print("\n=== [EXP 2] Generation — Pendulum (vanilla ConvVAE) ===")
     model_cfg = ConvVAEConfig.load("experiments/configs/exp_gen_pendulum.json")
     train_cfg = TrainConfig.load("experiments/configs/train_gen_pendulum.json")
-    set_seed(train_cfg.seed)
+    set_seed(seed if seed is not None else train_cfg.seed)
     n_epochs = epochs if epochs is not None else train_cfg.epochs
 
     train_loader, test_loader, _, _ = get_pendulum(
@@ -293,12 +293,12 @@ def exp_cls_pendulum(device, *, epochs=None, operators=None, digits=None, seed=N
 # CBM experiments — scalar concept bottleneck
 # ---------------------------------------------------------------------------
 
-def exp_cbm_gen_mnist(device, *, epochs=None, operators=None, digits=None, tag=None):
+def exp_cbm_gen_mnist(device, *, epochs=None, operators=None, digits=None, seed=None, tag=None):
     print("\n=== [EXP 5] CBM Generation — ArithmeticMNIST ===")
     backbone_cfg = ConvVAEConfig.load("experiments/configs/exp_cbm_gen_mnist_backbone.json")
     cbm_cfg      = CBMConfig.load("experiments/configs/cbm_mnist.json")
     train_cfg    = TrainConfig.load("experiments/configs/train_cbm_gen_mnist.json")
-    set_seed(train_cfg.seed)
+    set_seed(seed if seed is not None else train_cfg.seed)
     n_epochs = epochs if epochs is not None else train_cfg.epochs
 
     train_loader, test_loader = get_arithmetic_mnist(
@@ -337,12 +337,12 @@ def exp_cbm_gen_mnist(device, *, epochs=None, operators=None, digits=None, tag=N
     train_cfg.save(f"outputs/exp_cbm_gen_mnist{_tag}/train_config.json")
 
 
-def exp_cbm_gen_pendulum(device, *, epochs=None, operators=None, digits=None, tag=None):
+def exp_cbm_gen_pendulum(device, *, epochs=None, operators=None, digits=None, seed=None, tag=None):
     print("\n=== [EXP 6] CBM Generation — Pendulum ===")
     backbone_cfg = ConvVAEConfig.load("experiments/configs/exp_cbm_gen_pendulum_backbone.json")
     cbm_cfg      = CBMConfig.load("experiments/configs/cbm_pendulum.json")
     train_cfg    = TrainConfig.load("experiments/configs/train_cbm_gen_pendulum.json")
-    set_seed(train_cfg.seed)
+    set_seed(seed if seed is not None else train_cfg.seed)
     n_epochs = epochs if epochs is not None else train_cfg.epochs
 
     train_loader, test_loader, label_mean, label_std = get_pendulum(
@@ -532,12 +532,12 @@ def exp_cbm_cls_pendulum(device, *, epochs=None, operators=None, digits=None, se
 # CEM experiments — concept embedding model
 # ---------------------------------------------------------------------------
 
-def exp_cem_gen_mnist(device, *, epochs=None, operators=None, digits=None, tag=None):
+def exp_cem_gen_mnist(device, *, epochs=None, operators=None, digits=None, seed=None, tag=None):
     print("\n=== [EXP 9] CEM Generation — ArithmeticMNIST ===")
     backbone_cfg = ConvVAEConfig.load("experiments/configs/exp_cem_gen_mnist_backbone.json")
     cem_cfg      = CEMConfig.load("experiments/configs/cem_mnist.json")
     train_cfg    = TrainConfig.load("experiments/configs/train_cem_gen_mnist.json")
-    set_seed(train_cfg.seed)
+    set_seed(seed if seed is not None else train_cfg.seed)
     n_epochs = epochs if epochs is not None else train_cfg.epochs
 
     train_loader, test_loader = get_arithmetic_mnist(
@@ -576,12 +576,12 @@ def exp_cem_gen_mnist(device, *, epochs=None, operators=None, digits=None, tag=N
     train_cfg.save(f"outputs/exp_cem_gen_mnist{_tag}/train_config.json")
 
 
-def exp_cem_gen_pendulum(device, *, epochs=None, operators=None, digits=None, tag=None):
+def exp_cem_gen_pendulum(device, *, epochs=None, operators=None, digits=None, seed=None, tag=None):
     print("\n=== [EXP 10] CEM Generation — Pendulum ===")
     backbone_cfg = ConvVAEConfig.load("experiments/configs/exp_cem_gen_pendulum_backbone.json")
     cem_cfg      = CEMConfig.load("experiments/configs/cem_pendulum.json")
     train_cfg    = TrainConfig.load("experiments/configs/train_cem_gen_pendulum.json")
-    set_seed(train_cfg.seed)
+    set_seed(seed if seed is not None else train_cfg.seed)
     n_epochs = epochs if epochs is not None else train_cfg.epochs
 
     train_loader, test_loader, label_mean, label_std = get_pendulum(
@@ -1048,11 +1048,15 @@ def main():
             concept_mses  = [r[1] for r in results if isinstance(r, tuple) and len(r) >= 2]
             interv_mses   = [r[2] for r in results if isinstance(r, tuple) and len(r) >= 3]
             test_maps     = [r[3] for r in results if isinstance(r, tuple) and len(r) >= 4]
+            
             def _stat(lst, label, key):
-                if not lst: return None, None
-                m, s = np.mean(lst), np.std(lst)
+                vals = [v for v in lst if v is not None]
+                if not vals: return None, None
+                m, s = np.mean(vals), np.std(vals)
                 print(f"  {label}: {m:.6f} ± {s:.6f}")
                 return m, s
+
+
             print(f"\nFinal Statistics for {args.exp}:")
             stat_rows = []
             for lst, label, key in [
