@@ -102,6 +102,45 @@ def _random_fixed_batch(loader):
     idx = random.sample(range(len(dataset)), loader.batch_size)
     return loader.collate_fn([dataset[i] for i in idx])
 
+@torch.no_grad()
+def _eval_gen(model, loader, loss_fn, kl_weight, device, concept_norm=None):
+    """
+    Test-set evaluation for a generative (VAE) experiment.
+
+    The gen experiments used to return nothing, so a multi-seed sweep collected
+    a list of Nones and wrote a stats file with no rows — they silently never
+    appeared in the summary table. This gives them real test metrics to report.
+
+    concept_norm : callable mapping raw concept labels to the normalized scale
+                   the model was trained on. None for a concept-free baseline.
+
+    Returns {"recon_loss": ..., "kl": ...} plus "concept_mse" when concepts exist.
+    """
+    model.eval()
+    tot_recon = tot_kl = tot_cmse = 0.0
+    n_batches = 0
+    for x, c_true, _ in loader:
+        x   = x.to(device)
+        out = model(x)
+        if len(out) == 4:
+            recon, concepts, mu, log_var = out
+        else:
+            recon, mu, log_var = out
+            concepts = None
+        _, recon_l, kl = loss_fn(recon, x, mu, log_var, kl_weight)
+        tot_recon += recon_l.item()
+        tot_kl    += kl.item()
+        if concepts is not None and concept_norm is not None:
+            tot_cmse += F.mse_loss(concepts, concept_norm(c_true.to(device))).item()
+        n_batches += 1
+
+    metrics = {"recon_loss": tot_recon / n_batches, "kl": tot_kl / n_batches}
+    if concept_norm is not None:
+        metrics["concept_mse"] = tot_cmse / n_batches
+    print("  Test " + "  ".join(f"{k}={v:.4f}" for k, v in metrics.items()))
+    return metrics
+
+
 def save_csv(path, rows, header):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", newline="") as f:
@@ -149,6 +188,8 @@ def exp_gen_mnist(device, *, epochs=None, operators=None, digits=None, seed=None
 
     model_cfg.save(f"outputs/exp_gen_mnist{_tag}/model_config.json")
     train_cfg.save(f"outputs/exp_gen_mnist{_tag}/train_config.json")
+    return _eval_gen(model, test_loader, conv_vae_mnist_loss,
+                     model_cfg.kl_weight, device)
 
 
 def exp_gen_pendulum(device, *, epochs=None, operators=None, digits=None, seed=None, tag=None):
@@ -184,6 +225,8 @@ def exp_gen_pendulum(device, *, epochs=None, operators=None, digits=None, seed=N
 
     model_cfg.save(f"outputs/exp_gen_pendulum{_tag}/model_config.json")
     train_cfg.save(f"outputs/exp_gen_pendulum{_tag}/train_config.json")
+    return _eval_gen(model, test_loader, conv_vae_loss,
+                     model_cfg.kl_weight, device)
 
 
 # ---------------------------------------------------------------------------
@@ -335,6 +378,9 @@ def exp_cbm_gen_mnist(device, *, epochs=None, operators=None, digits=None, seed=
     backbone_cfg.save(f"outputs/exp_cbm_gen_mnist{_tag}/backbone_config.json")
     cbm_cfg.save(f"outputs/exp_cbm_gen_mnist{_tag}/cbm_config.json")
     train_cfg.save(f"outputs/exp_cbm_gen_mnist{_tag}/train_config.json")
+    return _eval_gen(model, test_loader, conv_vae_mnist_loss,
+                     backbone_cfg.kl_weight, device,
+                     concept_norm=lambda c: (c - MNIST_CONCEPT_MEAN) / MNIST_CONCEPT_SCALE)
 
 
 def exp_cbm_gen_pendulum(device, *, epochs=None, operators=None, digits=None, seed=None, tag=None):
@@ -379,6 +425,9 @@ def exp_cbm_gen_pendulum(device, *, epochs=None, operators=None, digits=None, se
     backbone_cfg.save(f"outputs/exp_cbm_gen_pendulum{_tag}/backbone_config.json")
     cbm_cfg.save(f"outputs/exp_cbm_gen_pendulum{_tag}/cbm_config.json")
     train_cfg.save(f"outputs/exp_cbm_gen_pendulum{_tag}/train_config.json")
+    return _eval_gen(model, test_loader, conv_vae_cbm_loss,
+                     backbone_cfg.kl_weight, device,
+                     concept_norm=lambda c: (c - label_mean) / label_std)
 
 
 def exp_cbm_cls_mnist(device, *, epochs=None, operators=None, digits=None, seed=None, tag=None):
@@ -443,6 +492,7 @@ def exp_cbm_cls_mnist(device, *, epochs=None, operators=None, digits=None, seed=
     print(f"  Test MSE: {test_mse:.4f}")
     print(f"  Concept MSE: {concept_mse:.4f}")
     print(f"  Test MSE with Interventions: {test_mse_interv:.4f}")
+    test_map /= len(test_loader)   # average like every other metric above
     print(f"  Test MAP: {test_map:.4f}")
     rows.append(["test", f"{test_mse:.6f}"])
 
@@ -451,7 +501,7 @@ def exp_cbm_cls_mnist(device, *, epochs=None, operators=None, digits=None, seed=
     backbone_cfg.save(f"outputs/exp_cbm_cls_mnist{_tag}/backbone_config.json")
     cbm_cfg.save(f"outputs/exp_cbm_cls_mnist{_tag}/cbm_config.json")
     train_cfg.save(f"outputs/exp_cbm_cls_mnist{_tag}/train_config.json")
-    return test_mse, concept_mse, test_mse_interv, test_map/len(test_loader)
+    return test_mse, concept_mse, test_mse_interv, test_map
 
 def exp_cbm_cls_pendulum(device, *, epochs=None, operators=None, digits=None, seed=None, tag=None):
     print("\n=== [EXP 8] CBM Regression — Pendulum ===")
@@ -517,6 +567,7 @@ def exp_cbm_cls_pendulum(device, *, epochs=None, operators=None, digits=None, se
     print(f"  Test MSE (original scale): {test_mse:.4f}")
     print(f"  Concept MSE: {concept_mse:.4f}")
     print(f"  Intervention MSE: {intervention_mse:.4f}")
+    test_map /= len(test_loader)   # average like every other metric above
     print(f"  Test MAP: {test_map:.4f}")
     rows.append(["test", f"{test_mse:.6f}"])
 
@@ -525,7 +576,7 @@ def exp_cbm_cls_pendulum(device, *, epochs=None, operators=None, digits=None, se
     backbone_cfg.save(f"outputs/exp_cbm_cls_pendulum{_tag}/backbone_config.json")
     cbm_cfg.save(f"outputs/exp_cbm_cls_pendulum{_tag}/cbm_config.json")
     train_cfg.save(f"outputs/exp_cbm_cls_pendulum{_tag}/train_config.json")
-    return test_mse, concept_mse, intervention_mse, test_map/len(test_loader)
+    return test_mse, concept_mse, intervention_mse, test_map
 
 
 # ---------------------------------------------------------------------------
@@ -574,6 +625,9 @@ def exp_cem_gen_mnist(device, *, epochs=None, operators=None, digits=None, seed=
     backbone_cfg.save(f"outputs/exp_cem_gen_mnist{_tag}/backbone_config.json")
     cem_cfg.save(f"outputs/exp_cem_gen_mnist{_tag}/cem_config.json")
     train_cfg.save(f"outputs/exp_cem_gen_mnist{_tag}/train_config.json")
+    return _eval_gen(model, test_loader, conv_vae_mnist_loss,
+                     backbone_cfg.kl_weight, device,
+                     concept_norm=lambda c: (c - MNIST_CONCEPT_MEAN) / MNIST_CONCEPT_SCALE)
 
 
 def exp_cem_gen_pendulum(device, *, epochs=None, operators=None, digits=None, seed=None, tag=None):
@@ -621,6 +675,9 @@ def exp_cem_gen_pendulum(device, *, epochs=None, operators=None, digits=None, se
     backbone_cfg.save(f"outputs/exp_cem_gen_pendulum{_tag}/backbone_config.json")
     cem_cfg.save(f"outputs/exp_cem_gen_pendulum{_tag}/cem_config.json")
     train_cfg.save(f"outputs/exp_cem_gen_pendulum{_tag}/train_config.json")
+    return _eval_gen(model, test_loader, conv_vae_cem_loss,
+                     backbone_cfg.kl_weight, device,
+                     concept_norm=lambda c: (c - label_mean) / label_std)
 
 
 def exp_cem_cls_mnist(device, *, epochs=None, operators=None, digits=None, seed=None, tag=None):
@@ -683,6 +740,7 @@ def exp_cem_cls_mnist(device, *, epochs=None, operators=None, digits=None, seed=
     print(f"  Test MSE: {test_mse:.4f}")
     print(f"  Concept MSE: {concept_mse:.4f}")
     print(f"  Intervention MSE: {intervention_mse:.4f}")
+    test_map /= len(test_loader)   # average like every other metric above
     print(f"  Test MAP: {test_map:.4f}")
     rows.append(["test", f"{test_mse:.6f}"])
 
@@ -691,7 +749,7 @@ def exp_cem_cls_mnist(device, *, epochs=None, operators=None, digits=None, seed=
     backbone_cfg.save(f"outputs/exp_cem_cls_mnist{_tag}/backbone_config.json")
     cem_cfg.save(f"outputs/exp_cem_cls_mnist{_tag}/cem_config.json")
     train_cfg.save(f"outputs/exp_cem_cls_mnist{_tag}/train_config.json")
-    return test_mse, concept_mse, intervention_mse, test_map/len(test_loader)
+    return test_mse, concept_mse, intervention_mse, test_map
 
 
 def exp_cem_cls_pendulum(device, *, epochs=None, operators=None, digits=None, seed=None, tag=None):
@@ -759,6 +817,7 @@ def exp_cem_cls_pendulum(device, *, epochs=None, operators=None, digits=None, se
     print(f"  Concept MSE: {concept_mse:.4f}")
     print(f"  Intervention MSE: {intervention_mse:.4f}")
     print(f"  Test MSE (original scale): {test_mse:.4f}")
+    test_map /= len(test_loader)   # average like every other metric above
     print(f"  Test MAP: {test_map:.4f}")
     rows.append(["test", f"{test_mse:.6f}"])
 
@@ -767,7 +826,7 @@ def exp_cem_cls_pendulum(device, *, epochs=None, operators=None, digits=None, se
     backbone_cfg.save(f"outputs/exp_cem_cls_pendulum{_tag}/backbone_config.json")
     cem_cfg.save(f"outputs/exp_cem_cls_pendulum{_tag}/cem_config.json")
     train_cfg.save(f"outputs/exp_cem_cls_pendulum{_tag}/train_config.json")
-    return test_mse, concept_mse, intervention_mse, test_map/len(test_loader)
+    return test_mse, concept_mse, intervention_mse, test_map
 
 # ---------------------------------------------------------------------------
 # Single-embedding CEM variants (tanh and linear gates)
@@ -832,6 +891,7 @@ def _exp_scaled_cem_cls_mnist(model_cls, exp_name, device, *,
     print(f"  Test MSE: {test_mse:.4f}")
     print(f"  Concept MSE: {concept_mse:.4f}")
     print(f"  Intervention MSE: {intervention_mse:.4f}")
+    test_map /= len(test_loader)   # average like every other metric above
     print(f"  Test MAP: {test_map:.4f}")
     rows.append(["test", f"{test_mse:.6f}"])
 
@@ -840,7 +900,7 @@ def _exp_scaled_cem_cls_mnist(model_cls, exp_name, device, *,
     backbone_cfg.save(f"outputs/{exp_name}{_tag}/backbone_config.json")
     cem_cfg.save(f"outputs/{exp_name}{_tag}/cem_config.json")
     train_cfg.save(f"outputs/{exp_name}{_tag}/train_config.json")
-    return test_mse, concept_mse, intervention_mse, test_map / n
+    return test_mse, concept_mse, intervention_mse, test_map
 
 
 def exp_cem_tanh_cls_mnist(device, *, epochs=None, operators=None, digits=None, seed=None, tag=None):
@@ -971,6 +1031,35 @@ def run_quantitative_suite(device, n_runs=5, epochs=None, operators=None, digits
 # Entrypoint
 # ---------------------------------------------------------------------------
 
+CANONICAL_METRICS = ["task_mse", "concept_mse", "intervention_mse", "test_map"]
+
+METRIC_LABELS = {
+    "task_mse":         "Task MSE",
+    "concept_mse":      "Concept MSE",
+    "intervention_mse": "Intervention MSE",
+    "test_map":         "Test MAP",
+    "recon_loss":       "Recon Loss",
+    "kl":               "KL",
+}
+
+
+def _as_metric_dict(result):
+    """
+    Normalize whatever an experiment returned into {metric_name: value}.
+
+    Supports all three shapes in this file: a dict of named metrics (gen
+    experiments), a 4-tuple in CANONICAL_METRICS order (CBM/CEM cls), and a
+    bare float (baseline cls). None values are dropped.
+    """
+    if result is None:
+        return {}
+    if isinstance(result, dict):
+        return {k: v for k, v in result.items() if v is not None}
+    if isinstance(result, tuple):
+        return {k: v for k, v in zip(CANONICAL_METRICS, result) if v is not None}
+    return {"task_mse": result}
+
+
 EXPERIMENTS = {
     # Baselines (no concepts)
     "exp_gen_mnist":           exp_gen_mnist,
@@ -1044,35 +1133,35 @@ def main():
                 print(f"\n>>> Run {i+1}/{args.runs} for {args.exp}")
                 r = EXPERIMENTS[args.exp](device, **kw, seed=41 + i)
                 results.append(r)
-            task_mses     = [r if not isinstance(r, tuple) else r[0] for r in results]
-            concept_mses  = [r[1] for r in results if isinstance(r, tuple) and len(r) >= 2]
-            interv_mses   = [r[2] for r in results if isinstance(r, tuple) and len(r) >= 3]
-            test_maps     = [r[3] for r in results if isinstance(r, tuple) and len(r) >= 4]
-            
-            def _stat(lst, label, key):
-                vals = [v for v in lst if v is not None]
-                if not vals: return None, None
-                m, s = np.mean(vals), np.std(vals)
-                print(f"  {label}: {m:.6f} ± {s:.6f}")
-                return m, s
+            # Collect every metric each run reported, keyed by name.
+            per_metric = {}
+            for r in results:
+                for k, v in _as_metric_dict(r).items():
+                    per_metric.setdefault(k, []).append(v)
 
+            # Canonical metrics first, then anything else in first-seen order.
+            ordered = ([m for m in CANONICAL_METRICS if m in per_metric]
+                       + [m for m in per_metric if m not in CANONICAL_METRICS])
 
             print(f"\nFinal Statistics for {args.exp}:")
             stat_rows = []
-            for lst, label, key in [
-                (task_mses,    "Task MSE",          "task_mse"),
-                (concept_mses, "Concept MSE",       "concept_mse"),
-                (interv_mses,  "Intervention MSE",  "intervention_mse"),
-                (test_maps,    "Test MAP",          "test_map"),
-            ]:
-                m, s = _stat(lst, label, key)
-                if m is not None:
-                    stat_rows.append([key, f"{m:.6f}", f"{s:.6f}"])
+            for key in ordered:
+                vals = per_metric[key]
+                m, sd = np.mean(vals), np.std(vals)
+                print(f"  {METRIC_LABELS.get(key, key)}: {m:.6f} ± {sd:.6f}  (n={len(vals)})")
+                stat_rows.append([key, f"{m:.6f}", f"{sd:.6f}"])
+
             _tag = f"_{args.tag}" if args.tag else ""
-            save_csv(
-                f"outputs/results/{args.exp}{_tag}_stats.csv",
-                stat_rows, ["metric", "mean", "std"],
-            )
+            if not stat_rows:
+                # Writing a header-only file here is how gen experiments used to
+                # vanish from the summary table without any visible error.
+                print(f"\n  WARNING: '{args.exp}' returned no metrics over {args.runs} runs.")
+                print("  No stats file written, so it will be absent from the summary table.")
+            else:
+                save_csv(
+                    f"outputs/results/{args.exp}{_tag}_stats.csv",
+                    stat_rows, ["metric", "mean", "std"],
+                )
         else:
             EXPERIMENTS[args.exp](device, **kw)
         print("\nAll done.")

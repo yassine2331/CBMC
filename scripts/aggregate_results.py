@@ -44,12 +44,15 @@ MODEL_NAMES = {
 }
 
 # Row order within one experiment. Unknown metrics are appended alphabetically.
-METRIC_ORDER = ["task_mse", "concept_mse", "intervention_mse", "test_map"]
+METRIC_ORDER = ["task_mse", "concept_mse", "intervention_mse", "test_map",
+                "recon_loss", "kl"]
 METRIC_NAMES = {
     "task_mse":         "Task MSE",
     "concept_mse":      "Concept MSE",
     "intervention_mse": "Intervention MSE",
     "test_map":         "Test MAP",
+    "recon_loss":       "Recon Loss",   # generation experiments
+    "kl":               "KL",           # generation experiments
 }
 
 EXP_ORDER = ["cls_mnist", "cls_pendulum", "gen_mnist", "gen_pendulum"]
