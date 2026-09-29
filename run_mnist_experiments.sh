@@ -105,6 +105,10 @@ run_exp  exp_cem_linear_cls_mnist  all_digits   "$DIGITS_ALL"
 #  Summary
 # ============================================================
 
+# Pivot every per-experiment *_stats.csv into one table:
+# rows = experiment x metric, columns = model (mean, std).
+python scripts/aggregate_results.py
+
 echo ""
 echo "============================================================"
 echo " Done. Final CSVs in outputs/results/:"
