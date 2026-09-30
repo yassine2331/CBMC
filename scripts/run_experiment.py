@@ -62,7 +62,7 @@ from architectures.cnn_cbm import CNNwithCBM
 from architectures.cnn_cem import CNNwithCEM
 from architectures.conv_vae_cbm import ConvVAEwithCBM, conv_vae_cbm_loss
 from architectures.conv_vae_cem import ConvVAEwithCEM, conv_vae_cem_loss
-from architectures.cnn_cem_scaled import CNNwithCEMTanh, CNNwithCEMLinear
+from architectures.cnn_cem_scaled import CNNwithCEMTanh, CNNwithCEMLinear, CNNwithCEMLinearRaw
 
 
 def conv_vae_mnist_loss(recon, x, mu, log_var, kl_weight=1.0):
@@ -928,6 +928,116 @@ def exp_cem_linear_cls_mnist(device, *, epochs=None, operators=None, digits=None
     )
 
 
+def exp_cem_linear_raw_cls_mnist(device, *, epochs=None, operators=None, digits=None, seed=None, tag=None):
+    return _exp_scaled_cem_cls_mnist(
+        CNNwithCEMLinearRaw, "exp_cem_linear_raw_cls_mnist", device,
+        epochs=epochs, operators=operators, digits=digits, seed=seed, tag=tag,
+    )
+
+
+def _exp_scaled_cem_cls_pendulum(model_cls, exp_name, device, *,
+                                 epochs=None, operators=None, digits=None,
+                                 seed=None, tag=None):
+    """
+    Pendulum sibling of _exp_scaled_cem_cls_mnist.
+
+    Runs any single-embedding CEM variant (CEMTanh / CEMLinear / CEMLinearRaw)
+    on the pendulum regression task, reusing exp_cem_cls_pendulum's configs so
+    the backbone, concept and training hyperparameters are identical to CEM's —
+    the variants then differ only in their gate.
+    """
+    print(f"\n=== {exp_name} — Pendulum ===")
+    backbone_cfg = CNNRegressionConfig.load("experiments/configs/exp_cem_cls_pendulum_backbone.json")
+    cem_cfg      = CEMConfig.load("experiments/configs/cem_pendulum.json")
+    train_cfg    = TrainConfig.load("experiments/configs/train_cem_pendulum.json")
+    set_seed(seed if seed is not None else train_cfg.seed)
+    n_epochs = epochs if epochs is not None else train_cfg.epochs
+
+    train_loader, test_loader, label_mean, label_std = get_pendulum(
+        batch_size=train_cfg.batch_size, num_workers=train_cfg.num_workers
+    )
+    label_mean, label_std = label_mean.to(device), label_std.to(device)
+    model     = model_cls(backbone_cfg, cem_cfg, n_outputs=backbone_cfg.n_outputs).to(device)
+    optimizer = optim.Adam(model.parameters(), lr=train_cfg.lr)
+    criterion = nn.MSELoss()
+    rows = []
+
+    for epoch in range(1, n_epochs + 1):
+        model.train()
+        total_orig_loss = 0
+        pbar = tqdm(train_loader, desc=f"  Epoch {epoch}/{n_epochs}", leave=False)
+        for x, c_true, y in pbar:
+            x, c_true, y = x.to(device), c_true.to(device), y.to(device)
+            c_norm = (c_true - label_mean) / label_std
+            y_norm = (y - label_mean) / label_std
+            if random.random() < train_cfg.intervention_prob:
+                preds, concepts = model(x, interventions=c_norm)
+            else:
+                preds, concepts = model(x)
+            task_loss    = criterion(preds, y_norm)
+            concept_loss = F.mse_loss(concepts, c_norm)
+            loss = task_loss + train_cfg.concept_weight * concept_loss
+            optimizer.zero_grad(); loss.backward(); optimizer.step()
+            with torch.no_grad():
+                preds_orig = preds.detach() * label_std + label_mean
+                total_orig_loss += criterion(preds_orig, y).item()
+            pbar.set_postfix(mse=f"{task_loss.item():.4f}", c_loss=f"{concept_loss.item():.3f}")
+        train_mse = total_orig_loss / len(train_loader)
+        print(f"  Epoch {epoch}/{n_epochs}  mse_orig={train_mse:.4f}")
+        rows.append([epoch, f"{train_mse:.6f}"])
+
+    model.eval()
+    test_mse = concept_mse = intervention_mse = test_map = 0
+    with torch.no_grad():
+        for x, c_true, y in test_loader:
+            x, c_true, y = x.to(device), c_true.to(device), y.to(device)
+            c_norm = (c_true - label_mean) / label_std
+            preds, concepts = model(x)
+            preds = preds * label_std + label_mean
+            test_mse    += criterion(preds, y).item()
+            concept_mse += F.mse_loss(concepts, c_norm).item()
+            test_map    += (preds - y).abs().mean().item()
+            preds_interv, _ = model(x, interventions=c_norm)
+            preds_interv = preds_interv * label_std + label_mean
+            intervention_mse += criterion(preds_interv, y).item()
+
+    n = len(test_loader)
+    test_mse /= n; concept_mse /= n; intervention_mse /= n; test_map /= n
+    print(f"  Concept MSE: {concept_mse:.4f}")
+    print(f"  Intervention MSE: {intervention_mse:.4f}")
+    print(f"  Test MSE (original scale): {test_mse:.4f}")
+    print(f"  Test MAP: {test_map:.4f}")
+    rows.append(["test", f"{test_mse:.6f}"])
+
+    _tag = f"_{tag}" if tag else ""
+    save_csv(f"outputs/results/{exp_name}{_tag}.csv", rows, ["epoch", "mse"])
+    backbone_cfg.save(f"outputs/{exp_name}{_tag}/backbone_config.json")
+    cem_cfg.save(f"outputs/{exp_name}{_tag}/cem_config.json")
+    train_cfg.save(f"outputs/{exp_name}{_tag}/train_config.json")
+    return test_mse, concept_mse, intervention_mse, test_map
+
+
+def exp_cem_linear_cls_pendulum(device, *, epochs=None, operators=None, digits=None, seed=None, tag=None):
+    return _exp_scaled_cem_cls_pendulum(
+        CNNwithCEMLinear, "exp_cem_linear_cls_pendulum", device,
+        epochs=epochs, operators=operators, digits=digits, seed=seed, tag=tag,
+    )
+
+
+def exp_cem_linear_raw_cls_pendulum(device, *, epochs=None, operators=None, digits=None, seed=None, tag=None):
+    return _exp_scaled_cem_cls_pendulum(
+        CNNwithCEMLinearRaw, "exp_cem_linear_raw_cls_pendulum", device,
+        epochs=epochs, operators=operators, digits=digits, seed=seed, tag=tag,
+    )
+
+
+def exp_cem_tanh_cls_pendulum(device, *, epochs=None, operators=None, digits=None, seed=None, tag=None):
+    return _exp_scaled_cem_cls_pendulum(
+        CNNwithCEMTanh, "exp_cem_tanh_cls_pendulum", device,
+        epochs=epochs, operators=operators, digits=digits, seed=seed, tag=tag,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Sample helpers for concept models (VAE variants)
 # ---------------------------------------------------------------------------
@@ -1090,6 +1200,10 @@ EXPERIMENTS = {
     # Single-embedding CEM ablations
     "exp_cem_tanh_cls_mnist":   exp_cem_tanh_cls_mnist,
     "exp_cem_linear_cls_mnist": exp_cem_linear_cls_mnist,
+    "exp_cem_linear_raw_cls_mnist": exp_cem_linear_raw_cls_mnist,
+    "exp_cem_tanh_cls_pendulum":       exp_cem_tanh_cls_pendulum,
+    "exp_cem_linear_cls_pendulum":     exp_cem_linear_cls_pendulum,
+    "exp_cem_linear_raw_cls_pendulum": exp_cem_linear_raw_cls_pendulum,
 }
 
 def main():

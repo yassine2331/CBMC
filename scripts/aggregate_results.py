@@ -34,13 +34,14 @@ TASKS    = ("gen", "cls")
 DATASETS = ("mnist", "pendulum")
 
 # Display name + column order for models. Anything unknown is appended alphabetically.
-MODEL_ORDER = ["baseline", "cbm", "cem", "cem_tanh", "cem_linear"]
+MODEL_ORDER = ["baseline", "cbm", "cem", "cem_tanh", "cem_linear", "cem_linear_raw"]
 MODEL_NAMES = {
     "baseline":   "Baseline",
     "cbm":        "CBM",
     "cem":        "CEM",
     "cem_tanh":   "CEM-Tanh",
     "cem_linear": "CEM-Linear",
+    "cem_linear_raw": "CEM-Linear-Raw",
 }
 
 # Row order within one experiment. Unknown metrics are appended alphabetically.

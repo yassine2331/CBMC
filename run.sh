@@ -133,7 +133,8 @@ run_one () {
 BASELINES="exp_gen_mnist exp_gen_pendulum exp_cls_mnist exp_cls_pendulum"
 CBM_EXPS="exp_cbm_gen_mnist exp_cbm_gen_pendulum exp_cbm_cls_mnist exp_cbm_cls_pendulum"
 CEM_EXPS="exp_cem_gen_mnist exp_cem_gen_pendulum exp_cem_cls_mnist exp_cem_cls_pendulum"
-ABLATIONS="exp_cem_tanh_cls_mnist exp_cem_linear_cls_mnist"
+ABLATIONS="exp_cem_tanh_cls_mnist exp_cem_linear_cls_mnist exp_cem_linear_raw_cls_mnist \
+           exp_cem_tanh_cls_pendulum exp_cem_linear_cls_pendulum exp_cem_linear_raw_cls_pendulum"
 
 case "$EXP_TYPE" in
     ALL)        GROUP="$BASELINES $CBM_EXPS $CEM_EXPS $ABLATIONS" ;;

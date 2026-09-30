@@ -11,18 +11,19 @@ and the concept score cᵢ multiplies it directly (no tanh, no pos/neg blending)
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from cbmc.concepts.cem import CEMLinear
+from cbmc.concepts.cem import CEMLinear, CEMLinearRaw
 from cbmc.configs import ConvVAEConfig, CEMConfig
 from architectures.backbone import ConvEncoder, ConvDecoder
 
 
 class ConvVAEwithCEMLinear(nn.Module):
-    def __init__(self, backbone_cfg: ConvVAEConfig, cem_cfg: CEMConfig):
+    def __init__(self, backbone_cfg: ConvVAEConfig, cem_cfg: CEMConfig,
+                 cem_cls=CEMLinear):
         super().__init__()
         self.backbone_cfg = backbone_cfg
         self.cem_cfg      = cem_cfg
         self.encoder      = ConvEncoder(backbone_cfg)
-        self.cem          = CEMLinear(
+        self.cem          = cem_cls(
             input_dim     = backbone_cfg.latent_dim,
             n_concepts    = cem_cfg.n_concepts,
             embedding_dim = cem_cfg.embedding_dim,
@@ -51,3 +52,10 @@ def conv_vae_cem_linear_loss(recon, x, mu, log_var, kl_weight=1.0):
     recon_loss = F.mse_loss(recon, x, reduction="sum") / x.size(0)
     kl         = -0.5 * (1 + log_var - mu.pow(2) - log_var.exp()).sum(1).mean()
     return recon_loss + kl_weight * kl, recon_loss, kl
+
+
+class ConvVAEwithCEMLinearRaw(ConvVAEwithCEMLinear):
+    """ConvVAE + CEMLinearRaw — as above but with no output normalization."""
+
+    def __init__(self, backbone_cfg: ConvVAEConfig, cem_cfg: CEMConfig):
+        super().__init__(backbone_cfg, cem_cfg, cem_cls=CEMLinearRaw)

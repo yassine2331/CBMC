@@ -395,6 +395,11 @@ class CEMLinear(nn.Module):
     The gate is unbounded; LayerNorm at the output stabilizes the scale before
     the downstream head.
 
+    Note that LayerNorm makes the block invariant to a *global* rescaling of
+    the concept vector — scaling every cᵢ by α leaves the output unchanged, so
+    only the relative pattern across concepts reaches the head. Pass
+    ``normalize=False`` (or use CEMLinearRaw) to keep the absolute scale.
+
     Inputs / outputs match the CEM interface exactly so it is a drop-in swap.
     """
 
@@ -406,6 +411,7 @@ class CEMLinear(nn.Module):
         hidden_dim: int = 64,
         depth: int = 2,
         dropout: float = 0.2,
+        normalize: bool = True,
     ) -> None:
         super().__init__()
         self.input_dim = input_dim
@@ -416,7 +422,8 @@ class CEMLinear(nn.Module):
             input_dim, n_concepts, hidden_dim, embedding_dim, depth, dropout)
         self.concept_predictor = _SingleConceptPredictor(
             n_concepts, embedding_dim, hidden_dim, depth, dropout)
-        self.output_norm = nn.LayerNorm(embedding_dim * n_concepts)
+        self.output_norm = (nn.LayerNorm(embedding_dim * n_concepts)
+                            if normalize else nn.Identity())
 
     @property
     def output_dim(self) -> int:
@@ -443,6 +450,44 @@ class CEMLinear(nn.Module):
         scaled = gate * emb                          # [B, E, C]
         flat = self.output_norm(scaled.view(x.size(0), -1))
         return flat, predicted_concepts
+
+
+class CEMLinearRaw(CEMLinear):
+    """
+    Single-embedding CEM variant with NO output normalization.
+
+        output_i = cᵢ · φᵢ(x)        (concatenated, passed straight to the head)
+
+    Identical to CEMLinear except that the output LayerNorm is removed, so the
+    absolute magnitude of the concept scores survives to the downstream head.
+    Use it alongside CEMLinear to isolate what that normalization costs: the
+    pair differs in exactly one thing, as CEM and CEMLinear differ in exactly
+    one thing (two interpolated embeddings vs one multiplied embedding).
+
+    Embeddings are unbounded here, which is what the LayerNorm was stabilizing,
+    so expect training to be more sensitive to the learning rate.
+
+    Inputs / outputs match the CEM interface exactly so it is a drop-in swap.
+    """
+
+    def __init__(
+        self,
+        input_dim: int,
+        n_concepts: int,
+        embedding_dim: int = 16,
+        hidden_dim: int = 64,
+        depth: int = 2,
+        dropout: float = 0.2,
+    ) -> None:
+        super().__init__(
+            input_dim=input_dim,
+            n_concepts=n_concepts,
+            embedding_dim=embedding_dim,
+            hidden_dim=hidden_dim,
+            depth=depth,
+            dropout=dropout,
+            normalize=False,
+        )
 
 
 # ---------------------------------------------------------------------------

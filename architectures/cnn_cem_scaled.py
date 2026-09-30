@@ -4,8 +4,9 @@ CNN + single-embedding CEM variants.
 Two ablations of the standard CEM that use one embedding per concept instead
 of a positive/negative pair:
 
-    CEMTanh  — output_i = tanh(c_i) * phi_i(x)
-    CEMLinear — output_i = c_i      * phi_i(x)
+    CEMTanh      — output_i = tanh(c_i) * phi_i(x)
+    CEMLinear    — output_i = c_i      * phi_i(x)   (LayerNorm on the output)
+    CEMLinearRaw — output_i = c_i      * phi_i(x)   (no output normalization)
 
 Both classes share the same interface as CNNwithCEM and are drop-in replacements
 in the experiment runner.
@@ -13,7 +14,7 @@ in the experiment runner.
 
 import torch.nn as nn
 from typing import Union
-from cbmc.concepts import CEMTanh, CEMLinear
+from cbmc.concepts import CEMTanh, CEMLinear, CEMLinearRaw
 from cbmc.configs import CNNConfig, CNNRegressionConfig, CEMConfig
 
 
@@ -75,6 +76,19 @@ class CNNwithCEMLinear(nn.Module):
                  cem_cfg: CEMConfig, n_outputs: int = None):
         super().__init__()
         self._model = _build_cnn_cem(backbone_cfg, CEMLinear, cem_cfg, n_outputs)
+        self.cem = self._model.cem
+
+    def forward(self, x, interventions=None, mask=None):
+        return self._model(x, interventions, mask)
+
+
+class CNNwithCEMLinearRaw(nn.Module):
+    """CNN + CEMLinearRaw: output_i = c_i * phi_i(x), with no output LayerNorm."""
+
+    def __init__(self, backbone_cfg: Union[CNNConfig, CNNRegressionConfig],
+                 cem_cfg: CEMConfig, n_outputs: int = None):
+        super().__init__()
+        self._model = _build_cnn_cem(backbone_cfg, CEMLinearRaw, cem_cfg, n_outputs)
         self.cem = self._model.cem
 
     def forward(self, x, interventions=None, mask=None):
