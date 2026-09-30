@@ -42,6 +42,9 @@ Usage: sbatch run.sh [EXPERIMENT|ALL] [--runs N]
                May also be given positionally, or as the RUNS env var.
   --epochs N   training epochs, overriding each experiment's JSON config.
                Omit to use the per-experiment config value. Also EPOCHS env var.
+  --no-gen     drop the generation (VAE) experiments from whatever was
+               selected. They are the slow ones; use this while iterating on
+               the classification/regression numbers. Also NO_GEN=1.
 
 Examples:
   sbatch run.sh                              # everything, 5 seeds
@@ -50,12 +53,15 @@ Examples:
   sbatch run.sh exp_cem_cls_mnist --runs 30  # one experiment, 30 seeds
   sbatch run.sh exp_cem_cls_mnist 30         # same, positional form
   sbatch run.sh CEM --runs 5 --epochs 50     # 50 epochs instead of the config's
+  sbatch run.sh --no-gen                     # every model, MNIST + pendulum, no VAEs
+  sbatch run.sh CEM --no-gen --runs 10       # CEM family, classification only
 EOF
 }
 
 EXP_TYPE=""
 RUNS="${RUNS:-5}"          # env var default, overridden by the flag below
 EPOCHS="${EPOCHS:-}"       # empty = use each experiment's own config value
+NO_GEN="${NO_GEN:-}"       # non-empty = skip the slow generation experiments
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -75,6 +81,8 @@ while [ $# -gt 0 ]; do
             EPOCHS="$2"; shift 2 ;;
         --epochs=*)
             EPOCHS="${1#*=}"; shift ;;
+        --no-gen|--nogen|--skip-gen)
+            NO_GEN=1; shift ;;
         -*)
             echo "ERROR: unknown option '$1'." >&2; usage >&2; exit 1 ;;
         *)
@@ -136,6 +144,24 @@ case "$EXP_TYPE" in
     GEN)        GROUP="exp_gen_mnist exp_gen_pendulum exp_cbm_gen_mnist exp_cbm_gen_pendulum exp_cem_gen_mnist exp_cem_gen_pendulum" ;;
     *)          GROUP="$EXP_TYPE" ;;
 esac
+
+# Drop generation experiments if asked. Done after group resolution so it
+# composes with every selector, including a single explicit experiment name.
+if [ -n "$NO_GEN" ]; then
+    FILTERED=""
+    for exp in $GROUP; do
+        case "$exp" in
+            *_gen_*) ;;                       # skip
+            *) FILTERED="$FILTERED $exp" ;;
+        esac
+    done
+    GROUP="$FILTERED"
+    echo "Skipping generation experiments (--no-gen)."
+    if [ -z "$(echo $GROUP | tr -d ' ')" ]; then
+        echo "ERROR: --no-gen removed every selected experiment." >&2
+        exit 1
+    fi
+fi
 
 N_EXPS=$(echo $GROUP | wc -w | tr -d ' ')
 echo "Experiments to run:  $N_EXPS  ($N_EXPS x $RUNS = $((N_EXPS * RUNS)) trainings)"

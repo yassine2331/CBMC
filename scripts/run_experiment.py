@@ -266,19 +266,26 @@ def exp_cls_mnist(device, *, epochs=None, operators=None, digits=None, seed=None
 
     model.eval()
     test_mse = 0
+    test_map = 0
     with torch.no_grad():
         for x, _, y in test_loader:
             x, y  = x.to(device), y.to(device).unsqueeze(1)
-            test_mse += criterion(model(x), y).item()
+            preds = model(x)
+            test_mse += criterion(preds, y).item()
+            # Same quantity the CBM/CEM experiments report as "test_map", so the
+            # baseline gets a cell in that row instead of a "--".
+            test_map += (preds - y).abs().mean().item()
     test_mse /= len(test_loader)
+    test_map /= len(test_loader)
     print(f"  Test MSE: {test_mse:.4f}")
+    print(f"  Test MAP: {test_map:.4f}")
     rows.append(["test", f"{test_mse:.6f}"])
 
     _tag = f"_{tag}" if tag else ""
     save_csv(f"outputs/results/exp_cls_mnist{_tag}.csv", rows, ["epoch", "mse"])
     model_cfg.save(f"outputs/exp_cls_mnist{_tag}/model_config.json")
     train_cfg.save(f"outputs/exp_cls_mnist{_tag}/train_config.json")
-    return test_mse
+    return {"task_mse": test_mse, "test_map": test_map}
 
 
 def exp_cls_pendulum(device, *, epochs=None, operators=None, digits=None, seed=None, tag=None):
@@ -317,20 +324,24 @@ def exp_cls_pendulum(device, *, epochs=None, operators=None, digits=None, seed=N
 
     model.eval()
     test_mse = 0
+    test_map = 0
     with torch.no_grad():
         for x, _, y in test_loader:
             x, y  = x.to(device), y.to(device)
             preds = model(x) * label_std + label_mean
             test_mse += criterion(preds, y).item()
+            test_map += (preds - y).abs().mean().item()
     test_mse /= len(test_loader)
+    test_map /= len(test_loader)
     print(f"  Test MSE (original scale): {test_mse:.4f}")
+    print(f"  Test MAP (original scale): {test_map:.4f}")
     rows.append(["test", f"{test_mse:.6f}"])
 
     _tag = f"_{tag}" if tag else ""
     save_csv(f"outputs/results/exp_cls_pendulum{_tag}.csv", rows, ["epoch", "mse"])
     model_cfg.save(f"outputs/exp_cls_pendulum{_tag}/model_config.json")
     train_cfg.save(f"outputs/exp_cls_pendulum{_tag}/train_config.json")
-    return test_mse
+    return {"task_mse": test_mse, "test_map": test_map}
 
 # ---------------------------------------------------------------------------
 # CBM experiments — scalar concept bottleneck
