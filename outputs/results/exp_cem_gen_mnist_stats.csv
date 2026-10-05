@@ -1,0 +1,4 @@
+metric,mean,std
+concept_mse,0.069616,0.003935
+recon_loss,430.594936,1.488400
+kl,47.231422,0.447781

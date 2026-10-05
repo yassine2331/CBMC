@@ -1,0 +1,3 @@
+metric,mean,std
+task_mse,203.709685,1.531179
+test_map,1.939948,0.215295
