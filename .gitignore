@@ -45,3 +45,8 @@ build/
 *.tar.gz
 *.tar
 *.zip
+
+/logs/
+*.tar.gz
+*.tar
+*.zip
