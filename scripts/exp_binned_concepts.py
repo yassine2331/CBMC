@@ -32,6 +32,13 @@ import random
 import time
 from pathlib import Path
 
+import os
+import sys
+
+# Same as the other scripts here: make the repo root importable so
+# `architectures` and `cbmc` resolve when run as `python scripts/...`.
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
 import numpy as np
 import torch
 import torch.nn as nn

@@ -165,3 +165,31 @@ class CEMCategoricalConfig(BaseConfig):
     depth:         int       = 2
     dropout:       float     = 0.2
     normalize:     bool      = True
+
+
+@dataclass
+class Conv3DConfig(BaseConfig):
+    """3D CNN encoder for volumetric input (LIDC nodule cubes)."""
+    in_channels:   int       = 1
+    conv_channels: List[int] = field(default_factory=lambda: [16, 32, 64, 128])
+    kernel_size:   int       = 3
+    batch_norm:    bool      = True
+    dropout:       float     = 0.0          # Dropout3d after each block
+    cube_size:     int       = 64           # input is cube_size^3
+
+
+@dataclass
+class LIDCDataConfig(BaseConfig):
+    """Which nodules to use and how to normalise them."""
+    data_dir:        str       = "data/processed/lidc"
+    min_annotations: int       = 3          # drop nodules few radiologists saw
+    drop_ambiguous:  bool      = True       # drop label == -1 (malignancy == 3)
+    hu_low:          int       = -1000      # lung window, applied to every cube
+    hu_high:         int       = 400
+    test_size:       float     = 0.2        # split is BY PATIENT, never by nodule
+    concepts:        List[str] = field(default_factory=lambda: [
+        "subtlety", "sphericity", "margin", "lobulation", "spiculation",
+        "texture", "diameter", "volume", "surface_area"])
+    # calcification and internalStructure are deliberately absent: they are
+    # nominal codes (1=popcorn, 2=laminated, ...), not magnitudes, so treating
+    # them as continuous concepts is meaningless. Use the categorical block.

@@ -1,0 +1,10 @@
+{
+  "epochs": 60,
+  "lr": 0.001,
+  "batch_size": 16,
+  "seed": 41,
+  "num_workers": 2,
+  "concept_weight": 1.0,
+  "intervention_prob": 0.25,
+  "cycle_weight": 0.0
+}

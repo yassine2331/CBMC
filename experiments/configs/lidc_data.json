@@ -1,0 +1,19 @@
+{
+  "data_dir": "data/processed/lidc",
+  "min_annotations": 3,
+  "drop_ambiguous": true,
+  "hu_low": -1000,
+  "hu_high": 400,
+  "test_size": 0.2,
+  "concepts": [
+    "subtlety",
+    "sphericity",
+    "margin",
+    "lobulation",
+    "spiculation",
+    "texture",
+    "diameter",
+    "volume",
+    "surface_area"
+  ]
+}
