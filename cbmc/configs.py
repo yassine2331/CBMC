@@ -146,3 +146,22 @@ class TrainConfig(BaseConfig):
     # Trains the decoder to actually change its output when concepts change.
     # Encoder grads are zeroed after this backward so only decoder+CEM update.
     cycle_weight:      float = 0.0
+
+
+@dataclass
+class CEMCategoricalConfig(BaseConfig):
+    """
+    Categorical (Case 2) concept bottleneck.
+
+    Set `n_states` to give each concept its own number of states; it wins over
+    `n_concepts`/`n_classes` when non-empty. Leave it empty to use `n_classes`
+    states for all `n_concepts` concepts.
+    """
+    n_concepts:    int       = 8
+    n_classes:     int       = 2          # used only when n_states is empty
+    n_states:      List[int] = field(default_factory=list)
+    embedding_dim: int       = 16
+    hidden_dim:    int       = 64
+    depth:         int       = 2
+    dropout:       float     = 0.2
+    normalize:     bool      = True

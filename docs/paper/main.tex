@@ -1,0 +1,373 @@
+% ---------------------------------------------------------------------------
+% CBMC — draft skeleton
+%
+% Compiles with plain pdflatex, no conference style files needed. Swap the
+% documentclass for neurips_2026.sty / icml2026.sty when the venue is chosen.
+%
+% NOTE: the method section below was reconstructed from GOAL.md and the
+% implemented code (cbmc/concepts/cem.py). Reconcile it against the formal
+% framework document before submission — see \todo markers throughout.
+% ---------------------------------------------------------------------------
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{multirow}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{natbib}
+
+\newcommand{\todo}[1]{\textcolor{red}{[TODO: #1]}}
+\newcommand{\cvec}{\mathbf{c}}
+\newcommand{\xvec}{\mathbf{x}}
+
+\title{Continuous Concept Bottleneck Models:\\
+       Interpolating Concept Embeddings over Real-Valued Concepts}
+\author{\todo{authors} \\ Universit\`a della Svizzera italiana}
+\date{}
+
+\begin{document}
+\maketitle
+
+% ===========================================================================
+\begin{abstract}
+Concept Bottleneck Models (CBMs) make predictions interpretable by routing them
+through a layer of human-meaningful concepts, but they assume concepts are
+binary. Many concepts of practical interest are not: the diameter of a lesion,
+the angle of a joint, the duration of a cardiac interval. Forcing such
+quantities into binary form discards the information that makes them useful.
+We present \textbf{CBMC}, a concept bottleneck that operates on continuous
+concepts. Building on Concept Embedding Models (CEM), we represent each concept
+by two learned anchor embeddings and place the sample at a point \emph{between}
+them determined by a predicted scalar, so that a concept's magnitude -- not
+merely its presence -- is carried forward to the task head. The same
+formulation admits test-time intervention on real-valued concepts.
+Across arithmetic-MNIST and a physical pendulum benchmark, in both predictive
+and generative settings, CBMC reduces task error by \todo{X}\% and concept
+error by \todo{X}\% relative to a binary CBM, while remaining competitive with
+an unconstrained black-box baseline. We further show that two natural
+alternatives -- gating a single embedding multiplicatively, with and without
+normalisation -- are substantially worse under intervention, isolating
+two-anchor interpolation as the component responsible.
+\todo{one sentence of results on LIDC-IDRI once trained}
+\end{abstract}
+
+% ===========================================================================
+\section{Introduction}
+\label{sec:intro}
+
+\todo{This section is a scaffold. Replace with the narrative from the method
+PDF once available.}
+
+Deep models are accurate and opaque. Concept Bottleneck Models
+\citep{koh2020concept} address the opacity by forcing predictions through an
+intermediate layer whose units correspond to concepts a human has named, so a
+prediction can be read as a function of quantities a domain expert recognises,
+and can be corrected by editing them.
+
+The standard formulation treats concepts as binary. \emph{Is there spiculation?
+Is the wing brown?} For many domains this is the wrong type. A radiologist does
+not record that a nodule \emph{has} a diameter; they record that it is
+\SI{12.7}{\milli\metre}. Binarising such a concept forces an arbitrary
+threshold, destroys ordering, and makes intervention coarse: one can assert
+``large'' but not ``\SI{12.7}{\milli\metre}''.
+
+Concept Embedding Models \citep{zarlenga2022concept} improved CBM accuracy by
+giving each concept a pair of learned embeddings and mixing them according to
+the predicted probability that the concept is active. We observe that this
+mixing coefficient need not be a probability. If it is instead a normalised
+\emph{magnitude}, the same architecture represents continuous concepts, and the
+mixing weight becomes a position along a learned axis between two anchors.
+
+\paragraph{Contributions.}
+\begin{enumerate}
+  \item A concept bottleneck for continuous concepts, obtained by reinterpreting
+        the CEM mixing coefficient as a clamped linear function of a predicted
+        real-valued concept (Section~\ref{sec:method}).
+  \item Intervention on real-valued concepts, and a protocol for measuring it.
+  \item An ablation isolating two-anchor interpolation from multiplicative
+        gating, showing the latter degrades intervention by \todo{X}$\times$.
+  \item \todo{LIDC-IDRI results: continuous clinical concepts from CT.}
+\end{enumerate}
+
+% ===========================================================================
+\section{Related Work}
+\label{sec:related}
+
+\paragraph{Concept bottlenecks.}
+\citet{koh2020concept} introduced CBMs with binary concepts and the
+independent/sequential/joint training regimes we follow.
+\todo{cite and position: Post-hoc CBM \citep{yuksekgonul2023posthoc} and
+Label-free CBM \citep{oikarinen2023labelfree}, both of which attach a
+bottleneck to a frozen foundation model; neither addresses continuous concepts.}
+
+\paragraph{Concept embeddings.}
+CEM \citep{zarlenga2022concept} is our direct predecessor and the baseline we
+compare against most closely. \todo{Make explicit that CEM is the $n=2$,
+binary-probability special case of our formulation.}
+
+\paragraph{Uncertainty over concepts.}
+Probabilistic CBM \citep{kim2023probabilistic} models each concept as a
+distribution rather than a point, and is the closest existing work to our
+Case~4. \todo{We do not yet compare empirically; see
+Section~\ref{sec:limitations}.}
+
+\paragraph{Continuous and structured concepts.}
+\todo{Survey what exists. Candidates: concept whitening, CBMs on regression
+targets, disentanglement work on dSprites/Shapes3D where generative factors are
+literally continuous. This paragraph is the one a reviewer will check hardest
+for novelty -- do not leave it thin.}
+
+% ===========================================================================
+\section{Method}
+\label{sec:method}
+
+\todo{Reconcile the whole section against the formal framework PDF. What
+follows matches the implementation in \texttt{cbmc/concepts/cem.py}.}
+
+\subsection{Setup}
+Let $\xvec$ be an input, $\cvec \in \mathbb{R}^k$ a vector of $k$ concept
+annotations, and $y$ a task target. A backbone $f$ maps $\xvec$ to a latent
+$h = f(\xvec)$. A bottleneck maps $h$ to concept predictions
+$\hat{\cvec}$ and to an embedding $z$ consumed by a task head $g$, so that
+$\hat{y} = g(z)$. Training minimises
+\begin{equation}
+  \mathcal{L} = \mathcal{L}_{\text{task}}(\hat{y}, y)
+              + \lambda\,\mathcal{L}_{\text{concept}}(\hat{\cvec}, \cvec).
+  \label{eq:loss}
+\end{equation}
+
+\subsection{A progression of concept types}
+We organise the design space by what a concept \emph{is}.
+
+\paragraph{Case 1: binary (CEM).}
+Each concept $i$ has anchors $e_i^{+}, e_i^{-} \in \mathbb{R}^m$ and a predicted
+probability $p_i = \sigma(g_i(h))$. The embedding is the convex combination
+$z_i = p_i e_i^{+} + (1 - p_i) e_i^{-}$.
+
+\paragraph{Case 2: categorical.}
+For an $n$-state concept, a softmax over $n$ anchors.
+\todo{Not implemented; relevant to LIDC's \texttt{calcification}, which is a
+6-way nominal code rather than an ordinal scale.}
+
+\paragraph{Case 3: discretised ranges.}
+Partition a continuous range into disjoint bins and treat bin identity as
+categorical. \todo{Not implemented.}
+
+\paragraph{Case 3.5: continuous via two anchors.}
+\textbf{This is the method evaluated in this paper.} Rather than discretise, we
+keep only the two extreme anchors and let a concept-specific regressor place
+the sample between them. For concept $i$ with predicted value $\hat{c}_i$,
+\begin{equation}
+  w_i = \mathrm{clamp}\!\left(\tfrac{1}{2}\hat{c}_i + \tfrac{1}{2},\, 0,\, 1\right),
+  \qquad
+  z_i = w_i\, e_i^{+}(h) + (1 - w_i)\, e_i^{-}(h).
+  \label{eq:case35}
+\end{equation}
+Concept annotations are normalised to $[-1, 1]$, so $w_i$ spans $[0,1]$ and the
+anchors are reached exactly at the extremes of the observed range. Anchors are
+produced by per-concept networks $e_i^{\pm}(h)$ rather than being free
+parameters, following CEM.
+
+We deliberately apply no squashing nonlinearity to $\hat{c}_i$ before the clamp.
+A $\tanh$ would compress the attainable range of $w_i$ to roughly
+$[0.12, 0.88]$, weakening both predictions and interventions; we verify this
+empirically in Section~\ref{sec:ablation}.
+
+\paragraph{Case 4: distributional.}
+As bins $\to \infty$ the concept becomes a density $p(z \mid \xvec)$.
+\todo{Theory only. Either implement for a head-to-head against Probabilistic
+CBM, or state explicitly as future work -- see Section~\ref{sec:limitations}.}
+
+\subsection{Intervention}
+At test time any subset of concepts may be replaced by ground truth. With a
+binary mask $\mathbf{m}$,
+\begin{equation}
+  \tilde{c}_i = m_i c_i + (1 - m_i)\hat{c}_i,
+\end{equation}
+and $\tilde{c}$ is substituted for $\hat{c}$ in Eq.~\ref{eq:case35}. Because
+$w_i$ is monotone in $\tilde{c}_i$ and saturates exactly at the anchors,
+intervening with an extreme value yields the corresponding anchor embedding --
+a vector the head has seen during training.
+
+\subsection{Alternatives we rule out}
+\label{sec:alternatives}
+Two simpler designs replace the anchor pair with a single embedding
+$\phi_i(h)$ scaled by the concept:
+\begin{align}
+  \textbf{CEM-Tanh:}   \quad & z_i = \tanh(\hat{c}_i)\,\phi_i(h), \\
+  \textbf{CEM-Linear:} \quad & z_i = \hat{c}_i\,\phi_i(h).
+\end{align}
+Both are strictly cheaper -- one embedding network per concept instead of two.
+We find both substantially worse under intervention
+(Section~\ref{sec:ablation}).
+
+A subtlety: with the output \textsc{LayerNorm} used throughout, CEM-Linear is
+\emph{invariant} to any global rescaling of $\hat{\cvec}$, since
+$\mathrm{LN}(\alpha z) = \mathrm{LN}(z)$. Only the relative pattern across
+concepts reaches the head. We therefore also report \textbf{CEM-Linear-Raw},
+identical but without the normalisation, which isolates this effect.
+
+% ===========================================================================
+\section{Experimental Setup}
+\label{sec:setup}
+
+\paragraph{Datasets.}
+\emph{ArithmeticMNIST}: two MNIST digits and an operator rendered on one canvas;
+concepts are the two digit values, the target is the arithmetic result.
+\emph{Pendulum}: rendered images of a pendulum under a light source; concepts
+are pendulum angle and light angle, the target is shadow geometry.
+\todo{LIDC-IDRI: 1{,}018 chest CT scans; concepts are 8 radiologist ratings
+plus nodule diameter, volume and surface area; target is malignancy. Data
+preparation is complete; training pending.}
+
+\paragraph{Baselines.}
+An unconstrained backbone with no bottleneck (\textbf{Baseline}); a binary
+concept bottleneck (\textbf{CBM}); and \textbf{CEM}.
+\todo{Add Probabilistic CBM, Post-hoc CBM, Label-free CBM -- none are currently
+run, and a reviewer will expect at least Probabilistic CBM.}
+
+\paragraph{Metrics.}
+Task MSE; concept MSE against normalised annotations; \emph{intervention MSE},
+the task error when all concepts are replaced by ground truth; and mean absolute
+error. For generative models we report test reconstruction loss and KL.
+All numbers are mean $\pm$ standard deviation over 5 seeds.
+
+% ===========================================================================
+\section{Results}
+\label{sec:results}
+
+\subsection{Prediction}
+
+\begin{table}[t]
+\centering
+\caption{ArithmeticMNIST. Lower is better throughout. CEM (our Case~3.5
+formulation) improves on both the unconstrained baseline and the binary CBM on
+every metric, and is the only concept model whose interventions help rather than
+hurt.}
+\label{tab:mnist}
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Model} & \textbf{Task MSE} & \textbf{Concept MSE} &
+\textbf{Intervention MSE} & \textbf{MAE} \\
+\midrule
+Baseline (no bottleneck) & $35.08 \pm 2.85$ & --- & --- & --- \\
+CBM \citep{koh2020concept}       & $44.98 \pm 3.98$ & $1.153 \pm 0.027$ & $128.06 \pm 0.05$ & $3.95 \pm 0.18$ \\
+\textbf{CEM (ours)}              & $\mathbf{19.67 \pm 1.10}$ & $\mathbf{0.259 \pm 0.002}$ & $\mathbf{9.90 \pm 1.89}$ & $\mathbf{2.03 \pm 0.13}$ \\
+\midrule
+\multicolumn{5}{l}{\emph{Ablations (single embedding, multiplicative gate)}} \\
+CEM-Tanh                         & $26.84 \pm 8.52$ & $0.337 \pm 0.002$ & $23.33 \pm 1.73$ & $2.67 \pm 0.44$ \\
+CEM-Linear                       & $23.61 \pm 0.02$ & $0.326 \pm 0.041$ & $22.32 \pm 0.75$ & $2.45 \pm 0.16$ \\
+CEM-Linear-Raw                   & \todo{} & \todo{} & \todo{} & \todo{} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+On ArithmeticMNIST (Table~\ref{tab:mnist}) the continuous bottleneck is not
+merely competitive with the unconstrained baseline -- it is \emph{better}
+($19.67$ vs.\ $35.08$), while the binary CBM is worse ($44.98$). The concept
+supervision acts as a useful inductive bias when the concepts are genuinely
+predictive of the target, which for a sum of two digits they are by
+construction.
+
+The intervention result is the sharper one. Replacing predicted concepts with
+ground truth \emph{reduces} CEM's error to $9.90$ but \emph{increases} the
+binary CBM's to $128.06$ -- nearly triple its own uncorrected error. A binary
+bottleneck cannot express ``this digit is a 7''; the intervention pushes the
+representation somewhere the head was never trained on.
+
+\begin{table}[t]
+\centering
+\caption{Pendulum regression. \todo{These numbers are reported for
+completeness but are not yet trustworthy -- see Section~\ref{sec:limitations}.}}
+\label{tab:pendulum}
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Model} & \textbf{Task MSE} & \textbf{Concept MSE} &
+\textbf{Intervention MSE} & \textbf{MAE} \\
+\midrule
+Baseline & $199.93 \pm 0.15$ & --- & --- & --- \\
+CBM      & $201.34 \pm 0.78$ & $0.0151 \pm 0.0000$ & $\mathbf{0.473 \pm 0.025}$ & $\mathbf{1.651 \pm 0.201}$ \\
+CEM      & $204.50 \pm 1.59$ & $0.0178 \pm 0.0002$ & $8.014 \pm 0.345$ & $2.022 \pm 0.134$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Generation}
+
+\begin{table}[t]
+\centering
+\caption{Generative setting (convolutional VAE backbone). Test reconstruction
+loss and KL. On ArithmeticMNIST the expected interpretability--fidelity
+trade-off appears: the unconstrained VAE reconstructs best, the binary CBM
+worst, and CEM sits between while achieving by far the lowest concept error.}
+\label{tab:gen}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Dataset} & \textbf{Model} & \textbf{Recon.\ loss} & \textbf{Concept MSE} \\
+\midrule
+\multirow{3}{*}{ArithmeticMNIST}
+ & Baseline VAE & $\mathbf{374.89 \pm 0.51}$ & --- \\
+ & CBM          & $662.76 \pm 13.78$ & $1.058 \pm 0.478$ \\
+ & CEM          & $430.59 \pm 1.49$ & $\mathbf{0.070 \pm 0.004}$ \\
+\midrule
+\multirow{3}{*}{Pendulum}
+ & Baseline VAE & $330.16 \pm 0.00$ & --- \\
+ & CBM          & $0.475 \pm 0.101$ & $0.154 \pm 0.016$ \\
+ & CEM          & $165.23 \pm 164.94$ & $\mathbf{0.027 \pm 0.006}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\todo{The pendulum rows of Table~\ref{tab:gen} must not be published as they
+stand. The baseline VAE has posterior-collapsed (KL $= 0.0000 \pm 0.0000$,
+identical across all seeds), and CEM's reconstruction standard deviation
+($164.94$) is as large as its mean, indicating that some seeds collapsed and
+others did not.}
+
+\subsection{Ablation: what makes interpolation work}
+\label{sec:ablation}
+
+Replacing the anchor pair with a single multiplicatively-gated embedding costs
+little in task error but a great deal under intervention: $9.90 \to 23.33$
+(Tanh) and $9.90 \to 22.32$ (Linear). \todo{Add CEM-Linear-Raw and report
+whether removing the \textsc{LayerNorm} recovers intervention performance. If
+it does, the mechanism is the scale invariance noted in
+Section~\ref{sec:alternatives}; if it does not, the two-anchor structure is
+doing the work and the paper's claim is stronger.}
+
+% ===========================================================================
+\section{Limitations}
+\label{sec:limitations}
+
+\todo{Be explicit about all of the following; a reviewer will find them.}
+\begin{itemize}
+  \item \textbf{Case 4 is theory only.} The comparison against Probabilistic
+        CBM \citep{kim2023probabilistic} that a reviewer will ask for first has
+        not been run.
+  \item \textbf{The pendulum benchmark is degenerate.} Its concept vector and
+        task target are the same four physical quantities, so intervening with
+        ground-truth concepts hands the model the answer. This explains why the
+        binary CBM appears to beat CEM there ($0.473$ vs.\ $8.014$): the task
+        rewards copying the input to the output, which a scalar bottleneck does
+        more faithfully than an embedding blend. Either re-scope the task
+        (concepts = angles, target = shadow geometry) or drop the benchmark.
+  \item \textbf{Pendulum error is reported in raw physical units} and is
+        dominated by one concept whose variance is 96\% of the total, making the
+        aggregate number hard to compare against published results.
+  \item \textbf{Posterior collapse} in the generative pendulum baseline
+        (Table~\ref{tab:gen}).
+  \item \textbf{Scale.} All current benchmarks are synthetic. LIDC-IDRI is the
+        intended answer.
+\end{itemize}
+
+% ===========================================================================
+\section{Conclusion}
+\todo{Write last.}
+
+\bibliographystyle{plainnat}
+\bibliography{refs}
+
+\end{document}
