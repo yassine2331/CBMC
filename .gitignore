@@ -9,8 +9,19 @@ data/raw/
 data/processed/
 /data/
 env
-# Training outputs — too large for git
-outputs/
+# Training outputs — too large for git, EXCEPT the result/log CSVs.
+# Those are a few KB of text and belong in version control so results move
+# between laptop and cluster with a plain git push/pull.
+# (gitignore cannot re-include a file inside an excluded DIRECTORY, so each
+#  level has to be opened up explicitly.)
+outputs/*
+!outputs/results/
+outputs/results/*
+!outputs/results/*.csv
+!outputs/results/*.tex
+!outputs/logs/
+outputs/logs/*
+!outputs/logs/*.csv
 
 # Python
 __pycache__/

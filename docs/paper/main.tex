@@ -44,14 +44,17 @@ by two learned anchor embeddings and place the sample at a point \emph{between}
 them determined by a predicted scalar, so that a concept's magnitude -- not
 merely its presence -- is carried forward to the task head. The same
 formulation admits test-time intervention on real-valued concepts.
-Across arithmetic-MNIST and a physical pendulum benchmark, in both predictive
-and generative settings, CBMC reduces task error by \todo{X}\% and concept
-error by \todo{X}\% relative to a binary CBM, while remaining competitive with
-an unconstrained black-box baseline. We further show that two natural
-alternatives -- gating a single embedding multiplicatively, with and without
-normalisation -- are substantially worse under intervention, isolating
-two-anchor interpolation as the component responsible.
-\todo{one sentence of results on LIDC-IDRI once trained}
+On an arithmetic-MNIST benchmark the continuous bottleneck halves task error
+relative to a binary CBM ($19.7$ vs.\ $45.0$ MSE) and reduces concept error by
+$4.5\times$, while also beating an unconstrained backbone. The gap is starkest
+under intervention: supplying ground-truth concepts \emph{reduces} our error to
+$9.9$ but \emph{raises} the binary CBM's to $128.1$, because a binary
+bottleneck cannot express the value being supplied. We additionally find that
+discretising a continuous concept into $k$ bins is competitive --- better still
+under intervention --- at a parameter cost growing linearly in $k$, and that
+gating a single embedding multiplicatively is substantially worse than
+interpolating between two anchors. \todo{LIDC-IDRI results once trained; the
+pipeline and 2{,}628-nodule dataset are prepared.}
 \end{abstract}
 
 % ===========================================================================
@@ -86,10 +89,18 @@ mixing weight becomes a position along a learned axis between two anchors.
   \item A concept bottleneck for continuous concepts, obtained by reinterpreting
         the CEM mixing coefficient as a clamped linear function of a predicted
         real-valued concept (Section~\ref{sec:method}).
-  \item Intervention on real-valued concepts, and a protocol for measuring it.
-  \item An ablation isolating two-anchor interpolation from multiplicative
-        gating, showing the latter degrades intervention by \todo{X}$\times$.
-  \item \todo{LIDC-IDRI results: continuous clinical concepts from CT.}
+  \item Intervention on real-valued concepts, and a protocol for measuring it;
+        the binary baseline is \emph{harmed} by correct interventions while
+        ours is helped.
+  \item A controlled comparison of four concept representations --- binary,
+        categorical, binned and continuous --- under one backbone, isolating
+        representation from architecture (Section~\ref{sec:binning}).
+  \item An ablation separating two-anchor interpolation from multiplicative
+        gating, including the observation that output normalisation makes a
+        multiplicative gate invariant to concept magnitude.
+  \item A reusable LIDC-IDRI benchmark: 2{,}628 nodule volumes with eleven
+        annotated concepts of three different types, plus measured annotator
+        disagreement (Section~\ref{sec:lidc}). \todo{results pending}
 \end{enumerate}
 
 % ===========================================================================
@@ -148,13 +159,26 @@ probability $p_i = \sigma(g_i(h))$. The embedding is the convex combination
 $z_i = p_i e_i^{+} + (1 - p_i) e_i^{-}$.
 
 \paragraph{Case 2: categorical.}
-For an $n$-state concept, a softmax over $n$ anchors.
-\todo{Not implemented; relevant to LIDC's \texttt{calcification}, which is a
-6-way nominal code rather than an ordinal scale.}
+An $n$-state concept gets $n$ anchors and a softmax over them:
+\begin{equation}
+  p_i = \mathrm{softmax}\big(g_i([\phi_{i,1} \Vert \dots \Vert \phi_{i,n}])\big),
+  \qquad
+  z_i = \sum_{s=1}^{n} p_{i,s}\, \phi_{i,s}(h).
+  \label{eq:case2}
+\end{equation}
+Following CEM, the state distribution is predicted from the \emph{concatenated}
+anchors rather than from $h$ directly. Case~1 is the $n=2$ special case, so a
+single implementation covers both. Concepts may carry different state counts,
+which matters for LIDC: \texttt{calcification} is a 6-way nominal code and
+\texttt{internalStructure} a 4-way one, while the remaining ratings have five
+levels.
 
 \paragraph{Case 3: discretised ranges.}
-Partition a continuous range into disjoint bins and treat bin identity as
-categorical. \todo{Not implemented.}
+A continuous range split into $k$ uniform bins, with bin identity treated as a
+categorical concept under Eq.~\ref{eq:case2}. Binning imposes a floor on
+achievable concept error --- the residual from reconstructing a value as its
+bin centre --- which we report alongside measured error so the two can be
+separated (Section~\ref{sec:binning}).
 
 \paragraph{Case 3.5: continuous via two anchors.}
 \textbf{This is the method evaluated in this paper.} Rather than discretise, we
@@ -209,6 +233,26 @@ A subtlety: with the output \textsc{LayerNorm} used throughout, CEM-Linear is
 $\mathrm{LN}(\alpha z) = \mathrm{LN}(z)$. Only the relative pattern across
 concepts reaches the head. We therefore also report \textbf{CEM-Linear-Raw},
 identical but without the normalisation, which isolates this effect.
+Empirically, scaling every concept by $10$ moves a normalised CEM-Linear's
+output by $5\times 10^{-4}$ while the unnormalised variant scales exactly
+tenfold, confirming the invariance is complete rather than approximate.
+
+\subsection{Balancing the two losses}
+\label{sec:lossbalance}
+Eq.~\ref{eq:loss} trades a task term against a concept term, and the two are
+not automatically on the same scale. On ArithmeticMNIST the target is an
+arithmetic result spanning $[0, 81]$, so the task MSE is of order $30$, while
+concepts are normalised to $[-1,1]$ and their MSE is of order $0.3$. At
+$\lambda = 1$ the concept gradient is roughly $95\times$ smaller and the concept
+head is effectively unsupervised: concept accuracy stays at chance and every
+concept representation looks equally poor.
+
+Raising $\lambda$ to $100$ changes the picture completely --- a 10-bin model
+moves from $13\%$ to $94\%$ concept accuracy --- and reverses the ranking
+between representations. We therefore report $\lambda$ with every result, and
+recommend checking concept accuracy against chance before drawing any
+conclusion about a bottleneck. \todo{$\lambda$ was not tuned; only $1$, $10$
+and $100$ were tried.}
 
 % ===========================================================================
 \section{Experimental Setup}
@@ -219,9 +263,19 @@ identical but without the normalisation, which isolates this effect.
 concepts are the two digit values, the target is the arithmetic result.
 \emph{Pendulum}: rendered images of a pendulum under a light source; concepts
 are pendulum angle and light angle, the target is shadow geometry.
-\todo{LIDC-IDRI: 1{,}018 chest CT scans; concepts are 8 radiologist ratings
-plus nodule diameter, volume and surface area; target is malignancy. Data
-preparation is complete; training pending.}
+\emph{LIDC-IDRI} \citep{armato2011lidc}: 1{,}018 chest CT scans annotated by up
+to four radiologists each. We extract a $64^3$\,mm box around every annotated
+nodule, resampled to $1$\,mm isotropic voxels so that a fixed voxel count means
+a fixed physical size regardless of scanner --- native slice spacing varies
+from $0.6$ to $5$\,mm, an $8.3\times$ spread that would otherwise make size
+concepts unlearnable from pixels. This yields \textbf{2{,}628 nodules from 875
+patients} (Table~\ref{tab:lidc}). Concepts are six radiologist ratings on a
+1--5 scale plus three geometric measurements (diameter, volume, surface area)
+computed from the traced contours; the target is malignancy, binarised by the
+standard convention. Splits are by patient: $71\%$ of nodules share a patient
+with another and $56\%$ of those groups are label-homogeneous, so a
+nodule-level split would leak the scanner rather than test the model.
+\todo{Training results pending.}
 
 \paragraph{Baselines.}
 An unconstrained backbone with no bottleneck (\textbf{Baseline}); a binary
@@ -243,10 +297,12 @@ All numbers are mean $\pm$ standard deviation over 5 seeds.
 
 \begin{table}[t]
 \centering
-\caption{ArithmeticMNIST. Lower is better throughout. CEM (our Case~3.5
-formulation) improves on both the unconstrained baseline and the binary CBM on
-every metric, and is the only concept model whose interventions help rather than
-hurt.}
+\caption{ArithmeticMNIST, 5 seeds, $\lambda = 1$. Lower is better throughout.
+CEM (our Case~3.5 formulation) improves on both the unconstrained baseline and
+the binary CBM on every metric, and is the only concept model whose
+interventions help rather than hurt. See Section~\ref{sec:lossbalance}: these
+numbers use $\lambda = 1$, which the binning study suggests under-trains every
+concept head.}
 \label{tab:mnist}
 \begin{tabular}{lcccc}
 \toprule
@@ -295,6 +351,53 @@ CEM      & $204.50 \pm 1.59$ & $0.0178 \pm 0.0002$ & $8.014 \pm 0.345$ & $2.022 
 \end{tabular}
 \end{table}
 
+\subsection{Discretising a continuous concept}
+\label{sec:binning}
+
+Section~\ref{sec:method} offers two ways to handle a continuous concept: bin it
+and treat the bin as categorical (Case~3), or interpolate between two anchors
+(Case~3.5). Table~\ref{tab:binned} compares them directly on ArithmeticMNIST,
+where the concepts are digit values in $[1,9]$, holding the backbone, embedding
+size, learning rate and seed fixed so the representation is the only
+difference.
+
+\begin{table}[t]
+\centering
+\caption{Binned concepts (Case~3) versus two-anchor interpolation (Case~3.5) on
+ArithmeticMNIST, 30 epochs, $\lambda = 100$. Binning wins on every error metric
+and improves monotonically with resolution, but the parameter cost grows
+linearly in $k$: each concept needs $k$ anchor networks rather than $2$.}
+\label{tab:binned}
+\begin{tabular}{lcccrc}
+\toprule
+\textbf{Model} & \textbf{Task MSE} & \textbf{Concept MSE} &
+\textbf{Interv.\ MSE} & \textbf{Params} & \textbf{Quant.\ floor} \\
+\midrule
+CEM, two anchors (Case 3.5) & $29.00$ & $0.0723$ & $16.98$ & $159$K & --- \\
+\midrule
+Binned, $k=5$   & $26.34$ & $0.0925$ & $7.45$ & $247$K & $0.0167$ \\
+Binned, $k=10$  & $13.15$ & $0.0357$ & $2.58$ & $392$K & $0.0044$ \\
+Binned, $k=20$  & $\mathbf{10.09}$ & $\mathbf{0.0313}$ & $\mathbf{2.19}$ &
+                  $683$K & $0.0014$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Two things stand out. First, discretisation does not cost accuracy here --- it
+improves it, by nearly $3\times$ on task MSE at $k=20$ and by $7.8\times$ on
+intervention error. A categorical intervention substitutes a one-hot, landing
+exactly on a learned anchor the head has seen in training, whereas a continuous
+intervention sets a weight that may fall anywhere between two anchors.
+
+Second, that accuracy is bought with parameters: $683$K at $k=20$ against
+$159$K for two anchors, growing linearly in $k$ while two anchors give
+unbounded resolution at fixed cost. The quantisation floor column shows the
+binned models remain $8$--$22\times$ above the error that binning alone
+imposes, so resolution is not yet the binding constraint at these bin counts.
+
+\todo{Single seed. Re-run with 5 seeds before claiming the ordering; the
+supporting script already supports \texttt{-{}-runs}.}
+
 \subsection{Generation}
 
 \begin{table}[t]
@@ -332,11 +435,65 @@ others did not.}
 
 Replacing the anchor pair with a single multiplicatively-gated embedding costs
 little in task error but a great deal under intervention: $9.90 \to 23.33$
-(Tanh) and $9.90 \to 22.32$ (Linear). \todo{Add CEM-Linear-Raw and report
-whether removing the \textsc{LayerNorm} recovers intervention performance. If
-it does, the mechanism is the scale invariance noted in
+(Tanh) and $9.90 \to 22.32$ (Linear). CEM-Linear-Raw, which removes the output
+normalisation, is implemented and included in the LIDC comparison; on
+ArithmeticMNIST it remains \todo{to be run}. If removing the normalisation
+recovers intervention performance, the mechanism is the scale invariance of
 Section~\ref{sec:alternatives}; if it does not, the two-anchor structure is
-doing the work and the paper's claim is stronger.}
+doing the work and the claim is stronger.
+
+\subsection{Scaling to clinical data: LIDC-IDRI}
+\label{sec:lidc}
+
+The benchmarks above are synthetic: concepts are known exactly because they were
+used to generate the data. LIDC-IDRI tests whether the formulation survives
+genuine clinical annotation, where concepts are noisy human judgements and the
+target is a diagnosis.
+
+\begin{table}[t]
+\centering
+\caption{LIDC-IDRI after preprocessing. Each nodule is a $64^3$\,mm box at
+$1$\,mm isotropic resolution with eleven annotated concepts. Requiring three or
+more radiologists halves the set but balances the classes and removes nodules
+only one annotator even identified.}
+\label{tab:lidc}
+\begin{tabular}{lrr}
+\toprule
+\textbf{Filter} & \textbf{Nodules} & \textbf{Benign / malignant} \\
+\midrule
+all extracted                      & 2{,}628 & --- \\
+drop ambiguous (malignancy $=3$)   & 1{,}991 & $68.2\% / 31.8\%$ \\
+\quad + at least 3 radiologists    & 1{,}180 & $55.7\% / 44.3\%$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Both concept types in one dataset.}
+LIDC exercises the full progression. Diameter, volume and surface area are
+genuine continuous scalars in physical units (Case~3.5). The six perceptual
+ratings are ordinal 1--5 levels (Case~2). Two further annotations ---
+\texttt{calcification} and \texttt{internalStructure} --- are nominal codes
+rather than magnitudes, and we exclude them from continuous treatment; they are
+the natural categorical case.
+
+\paragraph{Annotator disagreement as a target for Case 4.}
+Because up to four radiologists rated each nodule independently, every concept
+carries a measured spread. Across nodules with at least two annotators the mean
+standard deviation is $0.44$--$0.61$ rating points on a 1--5 scale, and
+$10$--$14\%$ of nodules show strong disagreement ($\sigma > 1$). This is
+ground-truth human uncertainty, not a modelling assumption, and gives Case~4 a
+target to be evaluated against rather than merely asserted --- a stronger
+evaluation than Probabilistic CBM \citep{kim2023probabilistic} currently
+admits. \todo{Case 4 is still unimplemented; this is the argument for building
+it.}
+
+\paragraph{Planned comparison.}
+We will report seven concept representations under an identical 3D CNN encoder,
+split, schedule and seeds: no bottleneck; scalar CBM; CEM with concepts
+binarised at the training mean (Case~1); categorical with per-concept state
+counts (Case~2/3); CEM-Linear with normalised and with raw concept values; and
+two-anchor interpolation (Case~3.5). \todo{Pipeline is implemented and
+verified end to end; the full run has not been executed.}
 
 % ===========================================================================
 \section{Limitations}
@@ -359,8 +516,16 @@ doing the work and the paper's claim is stronger.}
         aggregate number hard to compare against published results.
   \item \textbf{Posterior collapse} in the generative pendulum baseline
         (Table~\ref{tab:gen}).
-  \item \textbf{Scale.} All current benchmarks are synthetic. LIDC-IDRI is the
-        intended answer.
+  \item \textbf{Scale.} All \emph{reported} benchmarks are synthetic. The
+        LIDC-IDRI pipeline is built and verified but not yet run at full
+        length, so no clinical numbers appear here.
+  \item \textbf{Single-seed results.} Table~\ref{tab:binned} is one seed.
+  \item \textbf{$\lambda$ untuned.} Section~\ref{sec:lossbalance} shows the
+        conclusion about which representation is best can invert with the
+        concept-loss weight. Only three values were tried, and the main
+        ArithmeticMNIST results in Table~\ref{tab:mnist} use $\lambda = 1$,
+        which the binning study suggests is too low --- those numbers may
+        understate every concept model.
 \end{itemize}
 
 % ===========================================================================

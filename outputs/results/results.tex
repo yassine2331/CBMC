@@ -1,0 +1,106 @@
+\documentclass{article}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{siunitx}
+\usepackage{geometry}
+\geometry{margin=1in}
+
+\begin{document}
+
+\section*{Experimental Results on MNIST}
+
+All metrics are reported as mean $\pm$ standard deviation over multiple runs.
+Lower is better for all MSE metrics ($\downarrow$).
+The \textbf{best value} for each metric is highlighted in bold.
+
+% ---------------------------------------------------------------
+\subsection*{Digit 9 (Binary Classification)}
+% ---------------------------------------------------------------
+
+\begin{table}[h]
+\centering
+\caption{Results on MNIST Digit~9 (binary: is digit 9 or not).}
+\label{tab:digit9}
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Model}
+  & \textbf{Task MSE} $\downarrow$
+  & \textbf{Concept MSE} $\downarrow$
+  & \textbf{Intervention MSE} $\downarrow$
+  & \textbf{Test MAP} $\downarrow$ \\
+\midrule
+Classifier
+  & $0.925 \pm 0.440$
+  & ---
+  & ---
+  & --- \\
+CBM
+  & $2.302 \pm 2.636$
+  & $4.153 \pm 5.229$
+  & $992.395 \pm 0.661$
+  & $0.943 \pm 0.831$ \\
+CEM
+  & $\mathbf{0.018 \pm 0.006}$
+  & $\mathbf{0.013 \pm 0.014}$
+  & $\mathbf{0.019 \pm 0.008}$
+  & $0.130 \pm 0.024$ \\
+CEM (Linear)
+  & $0.045 \pm 0.081$
+  & $0.744 \pm 0.505$
+  & $8.938 \pm 9.568$
+  & $\mathbf{0.127 \pm 0.139}$ \\
+CEM (Tanh)
+  & $0.085 \pm 0.077$
+  & $0.768 \pm 0.680$
+  & $14.418 \pm 14.769$
+  & $0.231 \pm 0.083$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ---------------------------------------------------------------
+\subsection*{All Digits (Multi-class Classification)}
+% ---------------------------------------------------------------
+
+\begin{table}[h]
+\centering
+\caption{Results on MNIST All Digits (10-class classification).}
+\label{tab:all_digits}
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Model}
+  & \textbf{Task MSE} $\downarrow$
+  & \textbf{Concept MSE} $\downarrow$
+  & \textbf{Intervention MSE} $\downarrow$
+  & \textbf{Test MAP} $\downarrow$ \\
+\midrule
+Classifier
+  & $71.633 \pm 5.927$
+  & ---
+  & ---
+  & --- \\
+CBM
+  & $68.122 \pm 7.699$
+  & $3.871 \pm 3.341$
+  & $137.250 \pm 4.629$
+  & $5.449 \pm 0.319$ \\
+CEM
+  & $\mathbf{46.717 \pm 4.033}$
+  & $\mathbf{0.418 \pm 0.027}$
+  & $\mathbf{23.703 \pm 4.126}$
+  & $\mathbf{4.101 \pm 0.200}$ \\
+CEM (Linear)
+  & $56.321 \pm 9.956$
+  & $0.467 \pm 0.034$
+  & $49.511 \pm 11.179$
+  & $4.577 \pm 0.435$ \\
+CEM (Tanh)
+  & $63.805 \pm 9.851$
+  & $0.484 \pm 0.051$
+  & $57.105 \pm 18.477$
+  & $4.995 \pm 0.628$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\end{document}

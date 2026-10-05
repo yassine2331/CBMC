@@ -1,0 +1,5 @@
+metric,mean,std
+task_mse,2.302322,2.636453
+concept_mse,4.152632,5.228541
+intervention_mse,992.395073,0.661410
+test_map,0.942643,0.831155
