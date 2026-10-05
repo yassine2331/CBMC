@@ -13,7 +13,9 @@ Returns (logits, concepts). Supports test-time intervention through the same
 
 import torch.nn as nn
 
-from cbmc.concepts import CEM, CEMCategorical, CEMLinear, CEMLinearRaw, CEMTanh
+from cbmc import ContinuousBottleneck
+from cbmc.concepts import (CEM, CEMCategorical, CEMCategoricalPerConcept,
+                           CEMLinear, CEMLinearRaw, CEMTanh)
 from cbmc.configs import Conv3DConfig, CEMConfig
 
 # Name -> concept block, so a config can pick one by string.
@@ -92,3 +94,60 @@ class Conv3DBaseline(nn.Module):
 
     def forward(self, x, interventions=None, mask=None):
         return self.head(self.encoder(x)), None
+
+
+class Conv3DwithCBM(nn.Module):
+    """
+    Scalar concept bottleneck (Koh et al. style): the encoder is squeezed to
+    one number per concept, and the head sees only those numbers. No anchor
+    embeddings, so the head's entire view of the image is k scalars.
+
+    Returns (logits, concepts) like the CEM variants.
+    """
+
+    def __init__(self, backbone_cfg: Conv3DConfig, cem_cfg: CEMConfig,
+                 n_classes: int = 2, head_hidden=(32, 32)):
+        super().__init__()
+        self.encoder = Conv3DEncoder(backbone_cfg)
+        self.cbm = ContinuousBottleneck(in_dim=self.encoder.out_dim,
+                                        n_concepts=cem_cfg.n_concepts)
+        layers, in_f = [], cem_cfg.n_concepts
+        for h in head_hidden:
+            layers += [nn.Linear(in_f, h), nn.ReLU(inplace=True)]
+            in_f = h
+        layers.append(nn.Linear(in_f, n_classes))
+        self.head = nn.Sequential(*layers)
+
+    def forward(self, x, interventions=None, mask=None):
+        concepts = self.cbm(self.encoder(x))
+        used = concepts
+        if interventions is not None:
+            used = (interventions if mask is None
+                    else mask * interventions + (1 - mask) * concepts)
+        return self.head(used), concepts
+
+
+class Conv3DwithCategorical(nn.Module):
+    """
+    Categorical bottleneck where each concept may have its own number of
+    states — LIDC needs this, since the 1-5 ratings have 5 states while a
+    binned continuous concept has however many bins were requested.
+    """
+
+    def __init__(self, backbone_cfg: Conv3DConfig, cem_cfg: CEMConfig,
+                 n_states, n_classes: int = 2):
+        super().__init__()
+        self.encoder = Conv3DEncoder(backbone_cfg)
+        self.cem = CEMCategoricalPerConcept(
+            input_dim     = self.encoder.out_dim,
+            n_states      = n_states,
+            embedding_dim = cem_cfg.embedding_dim,
+            hidden_dim    = cem_cfg.hidden_dim,
+            depth         = cem_cfg.depth,
+            dropout       = cem_cfg.dropout,
+        )
+        self.head = nn.Linear(self.cem.output_dim, n_classes)
+
+    def forward(self, x, interventions=None, mask=None):
+        emb, logits = self.cem(self.encoder(x), interventions, mask)
+        return self.head(emb), logits

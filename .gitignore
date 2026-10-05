@@ -29,3 +29,8 @@ build/
 
 # macOS
 .DS_Store
+
+# Dataset archives — never commit these
+*.tar.gz
+*.tar
+*.zip
