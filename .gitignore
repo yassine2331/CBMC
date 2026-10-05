@@ -45,3 +45,8 @@ build/
 *.tar.gz
 *.tar
 *.zip
+
+# Slurm logs — .err fills with tqdm progress-bar redraws and reaches hundreds
+# of MB, past GitHub's 100 MB per-file limit. Anchored with a leading slash so
+# it does NOT also match outputs/logs/, which holds the small training curves.
+/logs/
