@@ -45,19 +45,21 @@ them determined by a predicted scalar, so that a concept's magnitude -- not
 merely its presence -- is carried forward to the task head. The same
 formulation admits test-time intervention on real-valued concepts.
 On an arithmetic-MNIST benchmark the continuous bottleneck halves task error
-relative to a binary CBM ($19.7$ vs.\ $45.0$ MSE) and reduces concept error by
-$4.5\times$, while also beating an unconstrained backbone. The gap is starkest
-under intervention: supplying ground-truth concepts \emph{reduces} our error to
-$9.9$ but \emph{raises} the binary CBM's to $128.1$, because a binary
+relative to a binary CBM ($31.2$ vs.\ $57.7$ MSE) and reduces concept error by
+$8\times$, while also halving the error of an unconstrained backbone. The gap
+is starkest under intervention: supplying ground-truth concepts \emph{reduces}
+our error to $13.5$ but \emph{raises} the binary CBM's to $133.6$, because a binary
 bottleneck cannot express the value being supplied. We additionally find that
 discretising a continuous concept into $k$ bins is competitive --- better still
 under intervention --- at a parameter cost growing linearly in $k$, and that
 gating a single embedding multiplicatively is substantially worse than
-interpolating between two anchors. On LIDC-IDRI lung CT, where concepts are
-radiologist annotations rather than generative factors, the ordering changes:
-every bottleneck now costs accuracy relative to an unconstrained backbone, and
-ours costs the least ($0.775$ vs.\ $0.787$ balanced accuracy, against
-$0.699$--$0.759$ for the alternatives).
+interpolating between two anchors. On LIDC-IDRI lung CT, however, where
+concepts are radiologist annotations rather than generative factors, the
+advantage does not reproduce: over 30 seeds no concept representation is
+distinguishable from any other on balanced accuracy, nor from an unconstrained
+backbone, and a scalar bottleneck intervenes significantly better than ours. We
+report this negative transfer, and what we think drives it, alongside the
+synthetic results.
 \end{abstract}
 
 % ===========================================================================
@@ -103,7 +105,9 @@ mixing weight becomes a position along a learned axis between two anchors.
         multiplicative gate invariant to concept magnitude.
   \item A reusable LIDC-IDRI benchmark: 2{,}628 nodule volumes with eleven
         annotated concepts of three different types, plus measured annotator
-        disagreement (Section~\ref{sec:lidc}). \todo{results pending}
+        disagreement; and a negative transfer result on it, where the
+        advantage measured on synthetic data does not reproduce
+        (Section~\ref{sec:lidc}).
 \end{enumerate}
 
 % ===========================================================================
@@ -317,28 +321,30 @@ concept head.}
 \textbf{Model} & \textbf{Task MSE} & \textbf{Concept MSE} &
 \textbf{Intervention MSE} & \textbf{MAE} \\
 \midrule
-Baseline (no bottleneck) & $35.08 \pm 2.85$ & --- & --- & --- \\
-CBM \citep{koh2020concept}       & $44.98 \pm 3.98$ & $1.153 \pm 0.027$ & $128.06 \pm 0.05$ & $3.95 \pm 0.18$ \\
-\textbf{CEM (ours)}              & $\mathbf{19.67 \pm 1.10}$ & $\mathbf{0.259 \pm 0.002}$ & $\mathbf{9.90 \pm 1.89}$ & $\mathbf{2.03 \pm 0.13}$ \\
+Baseline (no bottleneck) & $61.18 \pm 6.07$ & --- & --- & $4.97 \pm 0.30$ \\
+CBM \citep{koh2020concept}       & $57.74 \pm 2.42$ & $2.763 \pm 0.189$ & $133.64 \pm 0.81$ & $4.99 \pm 0.18$ \\
+\textbf{CEM (ours)}              & $\mathbf{31.18 \pm 1.27}$ & $\mathbf{0.344 \pm 0.008}$ & $\mathbf{13.45 \pm 2.58}$ & $\mathbf{3.17 \pm 0.05}$ \\
 \midrule
 \multicolumn{5}{l}{\emph{Ablations (single embedding, multiplicative gate)}} \\
-CEM-Tanh                         & $26.84 \pm 8.52$ & $0.337 \pm 0.002$ & $23.33 \pm 1.73$ & $2.67 \pm 0.44$ \\
-CEM-Linear                       & $23.61 \pm 0.02$ & $0.326 \pm 0.041$ & $22.32 \pm 0.75$ & $2.45 \pm 0.16$ \\
-CEM-Linear-Raw                   & \todo{} & \todo{} & \todo{} & \todo{} \\
+CEM-Tanh                         & $41.31 \pm 2.40$ & $0.402 \pm 0.006$ & $37.35 \pm 0.36$ & $3.88 \pm 0.09$ \\
+CEM-Linear                       & $41.59 \pm 2.85$ & $0.406 \pm 0.036$ & $33.80 \pm 3.62$ & $3.79 \pm 0.24$ \\
+CEM-Linear-Raw                   & \todo{not run} & \todo{} & \todo{} & \todo{} \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 On ArithmeticMNIST (Table~\ref{tab:mnist}) the continuous bottleneck is not
-merely competitive with the unconstrained baseline -- it is \emph{better}
-($19.67$ vs.\ $35.08$), while the binary CBM is worse ($44.98$). The concept
-supervision acts as a useful inductive bias when the concepts are genuinely
-predictive of the target, which for a sum of two digits they are by
-construction.
+merely competitive with the unconstrained baseline -- it is \emph{better},
+halving its error ($31.18$ vs.\ $61.18$), while the binary CBM barely improves
+on it ($57.74$). Concept supervision acts as a useful inductive bias when the
+concepts are genuinely predictive of the target, which for a sum of two digits
+they are by construction. The single-embedding ablations land between the two
+($41.31$, $41.59$), so both components -- having anchor embeddings at all, and
+having two of them to interpolate between -- contribute.
 
 The intervention result is the sharper one. Replacing predicted concepts with
-ground truth \emph{reduces} CEM's error to $9.90$ but \emph{increases} the
-binary CBM's to $128.06$ -- nearly triple its own uncorrected error. A binary
+ground truth \emph{reduces} CEM's error to $13.45$ but \emph{increases} the
+binary CBM's to $133.64$, more than double its own uncorrected error. A binary
 bottleneck cannot express ``this digit is a 7''; the intervention pushes the
 representation somewhere the head was never trained on.
 
@@ -352,9 +358,9 @@ completeness but are not yet trustworthy -- see Section~\ref{sec:limitations}.}}
 \textbf{Model} & \textbf{Task MSE} & \textbf{Concept MSE} &
 \textbf{Intervention MSE} & \textbf{MAE} \\
 \midrule
-Baseline & $199.93 \pm 0.15$ & --- & --- & --- \\
-CBM      & $201.34 \pm 0.78$ & $0.0151 \pm 0.0000$ & $\mathbf{0.473 \pm 0.025}$ & $\mathbf{1.651 \pm 0.201}$ \\
-CEM      & $204.50 \pm 1.59$ & $0.0178 \pm 0.0002$ & $8.014 \pm 0.345$ & $2.022 \pm 0.134$ \\
+Baseline & $\mathbf{203.71 \pm 1.53}$ & --- & --- & $\mathbf{1.940 \pm 0.215}$ \\
+CBM      & $210.22 \pm 1.70$ & $0.0199 \pm 0.0004$ & $\mathbf{2.110 \pm 0.248}$ & $2.623 \pm 0.049$ \\
+CEM      & $206.51 \pm 2.54$ & $\mathbf{0.0193 \pm 0.0018}$ & $7.815 \pm 1.987$ & $2.218 \pm 0.204$ \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -442,8 +448,8 @@ others did not.}
 \label{sec:ablation}
 
 Replacing the anchor pair with a single multiplicatively-gated embedding costs
-little in task error but a great deal under intervention: $9.90 \to 23.33$
-(Tanh) and $9.90 \to 22.32$ (Linear). CEM-Linear-Raw, which removes the output
+little in task error but a great deal under intervention: $13.45 \to 37.35$
+(Tanh) and $13.45 \to 33.80$ (Linear), a factor of $2.5$--$2.8$. CEM-Linear-Raw, which removes the output
 normalisation, is implemented and included in the LIDC comparison; on
 ArithmeticMNIST it remains \todo{to be run}. If removing the normalisation
 recovers intervention performance, the mechanism is the scale invariance of
@@ -497,71 +503,90 @@ it.}
 
 \paragraph{Seven representations, one encoder.}
 Table~\ref{tab:lidcresults} compares seven concept representations under an
-identical 3D CNN encoder, split, schedule and seeds, so the representation is
-the only thing that varies.
+identical 3D CNN encoder, split, schedule and seeds. The result does not
+support the ordering found on the synthetic benchmarks, and we report it as
+measured.
 
 \begin{table}[t]
 \centering
-\caption{LIDC-IDRI malignancy classification, 5 seeds, 60 epochs. Classes are
-$56/44$, so balanced accuracy is the figure to read. ``Interv.'' supplies the
-true concepts at test time. The last column compares intervention accuracy
-against the concepts-only ceiling of $0.863$ (Table~\ref{tab:app-ceiling}),
-which no bottleneck can exceed.}
+\caption{LIDC-IDRI malignancy classification, \textbf{30 seeds}, 100 epochs,
+$\lambda = 1$. Classes are $56/44$, so balanced accuracy is the figure to read.
+``Interv.'' supplies the true concepts at test time. No pairwise difference in
+balanced accuracy is statistically significant (Welch, $n=30$, all
+$|t| < 2$), including against the unconstrained backbone. The intervention
+column does separate: CBM is significantly better than ours ($t = 5.5$), as is
+the categorical variant ($t = 2.4$).}
 \label{tab:lidcresults}
 \begin{tabular}{lcccr}
 \toprule
 \textbf{Representation} & \textbf{Balanced acc.} & \textbf{Interv.\ acc.} &
 \textbf{\% of ceiling} & \textbf{Params} \\
 \midrule
-No bottleneck            & $\mathbf{0.787 \pm 0.014}$ & --- & --- & $292$K \\
+No bottleneck            & $0.778 \pm 0.063$ & --- & --- & $292$K \\
 \midrule
-CBM (scalar)             & $0.759 \pm 0.031$ & $\mathbf{0.836 \pm 0.010}$ & $97\%$ & $294$K \\
-CEM binary (Case 1)      & $0.756 \pm 0.068$ & $0.782 \pm 0.067$ & $91\%$ & $591$K \\
-Categorical (Case 2/3)   & $0.699 \pm 0.103$ & $0.754 \pm 0.097$ & $87\%$ & $985$K \\
-CEM-Linear (normalised)  & $0.759 \pm 0.022$ & $0.801 \pm 0.015$ & $93\%$ & $461$K \\
-CEM-Linear (raw)         & $0.735 \pm 0.025$ & $0.748 \pm 0.020$ & $87\%$ & $461$K \\
-\textbf{CEM (ours, Case 3.5)} & $\mathbf{0.775 \pm 0.024}$ & $0.818 \pm 0.022$ & $95\%$ & $591$K \\
+CBM (scalar)             & $0.778 \pm 0.042$ & $\mathbf{0.846 \pm 0.015}$ & $98\%$ & $294$K \\
+CEM binary (Case 1)      & $\mathbf{0.787 \pm 0.037}$ & $0.799 \pm 0.041$ & $93\%$ & $591$K \\
+Categorical (Case 2/3)   & $0.782 \pm 0.038$ & $0.821 \pm 0.035$ & $95\%$ & $985$K \\
+CEM-Linear (normalised)  & $0.778 \pm 0.036$ & $0.815 \pm 0.035$ & $94\%$ & $461$K \\
+CEM-Linear (raw)         & $0.737 \pm 0.054$ & $0.758 \pm 0.050$ & $88\%$ & $461$K \\
+CEM (ours, Case 3.5)     & $0.765 \pm 0.057$ & $0.795 \pm 0.049$ & $92\%$ & $591$K \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-Three results, one of which is not in our favour.
+\paragraph{On this dataset the bottleneck is free, and our formulation is not
+the best one.}
+Every representation except CEM-Linear with raw values lands between $0.765$
+and $0.787$ balanced accuracy, and so does the unconstrained backbone at
+$0.778$. With 30 seeds none of those differences reach significance. Two
+readings follow, and both matter.
 
-\paragraph{The bottleneck costs accuracy here, and ours costs least.}
-Unlike ArithmeticMNIST --- where concept supervision acted as a useful inductive
-bias and beat the unconstrained backbone --- on real clinical data every
-bottleneck loses accuracy. That is the expected interpretability--accuracy
-trade-off, and the honest framing. Two-anchor interpolation pays the smallest
-price: $0.775$ against $0.787$ unconstrained, a gap of $1.1$ points or $1.4\%$,
-while every other representation gives up $2.7$--$8.8$ points.
+First, the bottleneck costs nothing here: constraining predictions through nine
+interpretable concepts is as accurate as not constraining them at all. That is
+a positive result for concept bottlenecks in general.
 
-\paragraph{A scalar bottleneck intervenes best.}
-CBM reaches $0.836$ under intervention against our $0.818$, reversing the
-ArithmeticMNIST ordering where interventions actively harmed it. The mechanism
-is visible once the ceiling is in view: intervening on a scalar CBM replaces
-its $k$ numbers outright, so the intervened model \emph{is} the concepts-only
-classifier of Table~\ref{tab:app-ceiling}, and reaches $97\%$ of its $0.863$.
-An embedding bottleneck must route the supplied value through anchor
-embeddings, which costs a little fidelity. The compensation is that CBM gives
-up more accuracy when \emph{not} intervened on. \todo{This deserves a direct
-experiment: measure accuracy as a function of the fraction of concepts
-intervened on, rather than only at $0\%$ and $100\%$.}
+Second, it is not a result for \emph{our} formulation specifically. Two-anchor
+interpolation ranks sixth of seven on balanced accuracy, below binary
+concepts ($0.787$), categorical ($0.782$) and a scalar CBM ($0.778$), though
+again not significantly so. The advantage we measure on ArithmeticMNIST
+(Table~\ref{tab:mnist}) does not reproduce when the concepts are radiologist
+annotations rather than the generative factors of the data.
 
-\paragraph{Categorical representation fails on this data.}
-It is both the worst performer ($0.699$) and by far the least stable, with a
-seed standard deviation of $0.103$ against $0.014$--$0.031$ for everything
-else, while costing the most parameters ($985$K). The contrast with
-ArithmeticMNIST, where binning won decisively (Table~\ref{tab:app-binned}), is
-sharp: there the underlying concepts were nine discrete digit values, here they
-are continuous physical measurements that binning genuinely destroys.
-Discretisation helps when the concept is latently discrete and hurts when it is
-not. \todo{Sweep the bin count on LIDC to confirm this reading.}
+\paragraph{Intervention: the clearest signal, and it is against us.}
+Unlike balanced accuracy, intervention accuracy does separate the methods, and
+the scalar CBM wins decisively: $0.846$ against our $0.795$, a difference of
+$5.5$ standard errors. The categorical variant also beats us significantly
+($0.821$, $t = 2.4$). The mechanism is visible once the concepts-only ceiling
+is in view (Table~\ref{tab:app-ceiling}): intervening on a scalar bottleneck
+replaces its $k$ numbers outright, so the intervened model \emph{is} the
+concepts-only classifier, and reaches $98\%$ of its $0.863$. An embedding
+bottleneck must route the supplied value through anchor embeddings, and on this
+data that indirection costs more than it returns.
 
-\paragraph{Normalisation matters, as predicted.}
-CEM-Linear with raw concept values is the weakest of the embedding variants on
-both metrics ($0.735$, $0.748$), confirming Section~\ref{sec:alternatives}:
-with concepts spanning $[0, 10^4]$ in raw units, a multiplicative gate is
-dominated by whichever concept has the largest magnitude.
+This directly contradicts the ArithmeticMNIST finding, where interventions
+harmed the binary CBM and helped ours. We do not have an account that explains
+both. \todo{The partial-intervention curve --- accuracy against the fraction of
+concepts corrected --- is the obvious next measurement, and would show whether
+the embedding bottleneck has any regime where it leads.}
+
+\paragraph{What does replicate: normalisation.}
+CEM-Linear with raw concept values is last on both metrics ($0.737$, $0.758$)
+and is the only variant significantly worse than ours under intervention
+($t = 2.9$). With concepts spanning $[0, 10^4]$ in raw units, a multiplicative
+gate is dominated by whichever concept has the largest magnitude, exactly as
+Section~\ref{sec:alternatives} predicts.
+
+\paragraph{Every model overfits.}
+Training accuracy reaches $0.96$--$1.00$ against test balanced accuracy of
+$0.74$--$0.79$ (Table~\ref{tab:app-overfit}), a gap of roughly $20$ points on
+$944$ training volumes. No validation split or early stopping was used, so each
+number is test performance at an arbitrary stopping point rather than at the
+model's best. The single exception is CEM-Linear with raw values, which reaches
+only $0.771$ training accuracy --- it fails to fit at all, consistent with the
+magnitude-dominated gate. Augmentation was available but not enabled for this
+run. We regard the LIDC comparison as under-regularised and therefore
+preliminary. \todo{Re-run with augmentation, weight decay and early stopping on
+a held-out validation split before drawing conclusions from the ordering.}
 
 % ===========================================================================
 \section{Limitations}
@@ -584,14 +609,22 @@ dominated by whichever concept has the largest magnitude.
         aggregate number hard to compare against published results.
   \item \textbf{Posterior collapse} in the generative pendulum baseline
         (Table~\ref{tab:gen}).
-  \item \textbf{A scalar bottleneck intervenes better than ours on LIDC}
-        ($0.836$ vs.\ $0.818$). We offer a mechanism but have not tested it:
-        the partial-intervention curve would settle whether the embedding
-        bottleneck's advantage appears only when few concepts are corrected.
-  \item \textbf{The categorical result is unstable} (seed $\sigma = 0.103$), so
-        its last-place ranking should be treated as provisional.
-  \item \textbf{One dataset, one split protocol.} LIDC results use a single
-        train/test ratio and no external validation cohort.
+  \item \textbf{Our formulation does not win on LIDC.} It ranks sixth of
+        seven on balanced accuracy and is significantly worse than a scalar
+        CBM under intervention ($t = 5.5$). The method's advantage is
+        currently demonstrated only on data whose concepts are the generative
+        factors.
+  \item \textbf{Nothing is significant on LIDC balanced accuracy.} Over 30
+        seeds no representation separates from any other, nor from the
+        unconstrained backbone. The dataset may simply lack the power to rank
+        these methods at $1{,}180$ samples.
+  \item \textbf{The LIDC run is under-regularised.} Every model reaches
+        $0.96$--$1.00$ training accuracy against $0.74$--$0.79$ test
+        (Table~\ref{tab:app-overfit}). No augmentation, weight decay, early
+        stopping or validation split was used, so the reported numbers are
+        test performance at an arbitrary epoch.
+  \item \textbf{One dataset, one split protocol}, with no external validation
+        cohort.
   \item \textbf{Single-seed results.} Table~\ref{tab:binned} is one seed.
   \item \textbf{$\lambda$ untuned.} Section~\ref{sec:lossbalance} shows the
         conclusion about which representation is best can invert with the
@@ -630,11 +663,40 @@ concepts with ground truth.}
 \textbf{Model} & \textbf{Task MSE} & \textbf{Concept MSE} &
 \textbf{Interv.\ MSE} & \textbf{MAE} \\
 \midrule
-Baseline (no bottleneck) & $35.08 \pm 2.85$ & --- & --- & --- \\
-CBM                      & $44.98 \pm 3.98$ & $1.153 \pm 0.027$ & $128.06 \pm 0.05$ & $3.95 \pm 0.18$ \\
-CEM (ours)               & $\mathbf{19.67 \pm 1.10}$ & $\mathbf{0.259 \pm 0.002}$ & $\mathbf{9.90 \pm 1.89}$ & $\mathbf{2.03 \pm 0.13}$ \\
-CEM-Tanh                 & $26.84 \pm 8.52$ & $0.337 \pm 0.002$ & $23.33 \pm 1.73$ & $2.67 \pm 0.44$ \\
-CEM-Linear               & $23.61 \pm 0.02$ & $0.326 \pm 0.041$ & $22.32 \pm 0.75$ & $2.45 \pm 0.16$ \\
+Baseline (no bottleneck) & $61.18 \pm 6.07$ & --- & --- & $4.97 \pm 0.30$ \\
+CBM                      & $57.74 \pm 2.42$ & $2.763 \pm 0.189$ & $133.64 \pm 0.81$ & $4.99 \pm 0.18$ \\
+CEM (ours)               & $\mathbf{31.18 \pm 1.27}$ & $\mathbf{0.344 \pm 0.008}$ & $\mathbf{13.45 \pm 2.58}$ & $\mathbf{3.17 \pm 0.05}$ \\
+CEM-Tanh                 & $41.31 \pm 2.40$ & $0.402 \pm 0.006$ & $37.35 \pm 0.36$ & $3.88 \pm 0.09$ \\
+CEM-Linear               & $41.59 \pm 2.85$ & $0.406 \pm 0.036$ & $33.80 \pm 3.62$ & $3.79 \pm 0.24$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[h]
+\centering
+\caption{Two restricted variants of the same ArithmeticMNIST task, 5 seeds,
+20 epochs, $\lambda = 1$. \texttt{all\_digits} uses digits 1--9;
+\texttt{digit9} restricts to a single digit, which makes the task nearly
+trivial and inflates every ratio. The ordering between models is unchanged.}
+\label{tab:app-mnist-variants}
+\begin{tabular}{llcccc}
+\toprule
+\textbf{Variant} & \textbf{Model} & \textbf{Task MSE} & \textbf{Concept MSE} &
+\textbf{Interv.\ MSE} & \textbf{MAE} \\
+\midrule
+\multirow{5}{*}{\texttt{all\_digits}}
+ & Baseline   & $71.63 \pm 5.93$ & --- & --- & --- \\
+ & CBM        & $68.12 \pm 7.70$ & $3.871 \pm 3.341$ & $137.25 \pm 4.63$ & $5.45 \pm 0.32$ \\
+ & CEM        & $\mathbf{46.72 \pm 4.03}$ & $\mathbf{0.418 \pm 0.027}$ & $\mathbf{23.70 \pm 4.13}$ & $\mathbf{4.10 \pm 0.20}$ \\
+ & CEM-Tanh   & $63.80 \pm 9.85$ & $0.484 \pm 0.052$ & $57.10 \pm 18.48$ & $4.99 \pm 0.63$ \\
+ & CEM-Linear & $56.32 \pm 9.96$ & $0.467 \pm 0.034$ & $49.51 \pm 11.18$ & $4.58 \pm 0.44$ \\
+\midrule
+\multirow{5}{*}{\texttt{digit9}}
+ & Baseline   & $0.925 \pm 0.440$ & --- & --- & --- \\
+ & CBM        & $2.302 \pm 2.636$ & $4.153 \pm 5.229$ & $992.40 \pm 0.66$ & $0.943 \pm 0.831$ \\
+ & CEM        & $\mathbf{0.018 \pm 0.006}$ & $\mathbf{0.013 \pm 0.014}$ & $\mathbf{0.019 \pm 0.008}$ & $0.130 \pm 0.024$ \\
+ & CEM-Tanh   & $0.085 \pm 0.077$ & $0.768 \pm 0.680$ & $14.42 \pm 14.77$ & $0.231 \pm 0.083$ \\
+ & CEM-Linear & $0.045 \pm 0.081$ & $0.744 \pm 0.505$ & $8.94 \pm 9.57$ & $\mathbf{0.127 \pm 0.139}$ \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -654,9 +716,9 @@ Section~\ref{sec:limitations}.}}
 \textbf{Model} & \textbf{Task MSE} & \textbf{Concept MSE} &
 \textbf{Interv.\ MSE} & \textbf{MAE} \\
 \midrule
-Baseline & $\mathbf{199.93 \pm 0.15}$ & --- & --- & --- \\
-CBM      & $201.34 \pm 0.78$ & $\mathbf{0.0151 \pm 0.0000}$ & $\mathbf{0.473 \pm 0.025}$ & $\mathbf{1.651 \pm 0.201}$ \\
-CEM      & $204.50 \pm 1.59$ & $0.0178 \pm 0.0002$ & $8.014 \pm 0.345$ & $2.022 \pm 0.134$ \\
+Baseline & $\mathbf{203.71 \pm 1.53}$ & --- & --- & $\mathbf{1.940 \pm 0.215}$ \\
+CBM      & $210.22 \pm 1.70$ & $0.0199 \pm 0.0004$ & $\mathbf{2.110 \pm 0.248}$ & $2.623 \pm 0.049$ \\
+CEM      & $206.51 \pm 2.54$ & $\mathbf{0.0193 \pm 0.0018}$ & $7.815 \pm 1.987$ & $2.218 \pm 0.204$ \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -842,37 +904,61 @@ sphericity    & $0.062$ \\
 
 \begin{table}[h]
 \centering
-\caption{Every metric from the seven-variant LIDC run, 5 seeds, 60 epochs,
+\caption{Every metric from the seven-variant LIDC run: 30 seeds, 100 epochs,
 $\lambda = 1$, intervention probability $0.25$, encoder $[16,32,64,128]$,
-embedding dimension $16$, $1{,}180$ nodules at $\geq 3$ annotators. Concept MAE
-is relative to each concept's range, averaged over the nine concepts; concept
-accuracy applies only to the representations that predict a discrete state.}
+embedding dimension $16$, $1{,}180$ nodules at $\geq 3$ annotators, no
+augmentation. Concept MAE is relative to each concept's range, averaged over
+the nine concepts; concept accuracy applies only to representations predicting
+a discrete state.}
 \label{tab:app-lidc-full}
 \begin{tabular}{lccccc}
 \toprule
 \textbf{Representation} & \textbf{Accuracy} & \textbf{Balanced acc.} &
 \textbf{Interv.\ acc.} & \textbf{Conc.\ acc.} & \textbf{Conc.\ MAE (rel)} \\
 \midrule
-No bottleneck    & $0.796 \pm 0.012$ & $\mathbf{0.786 \pm 0.014}$ & --- & --- & --- \\
-CBM (scalar)     & $0.758 \pm 0.037$ & $0.759 \pm 0.031$ & $\mathbf{0.836 \pm 0.010}$ & --- & $0.138$ \\
-CEM binary       & $0.760 \pm 0.072$ & $0.756 \pm 0.068$ & $0.782 \pm 0.067$ & $0.739$ & $0.135$ \\
-Categorical      & $0.686 \pm 0.121$ & $0.699 \pm 0.103$ & $0.754 \pm 0.097$ & $0.649$ & $0.143$ \\
-CEM-Linear (norm)& $0.760 \pm 0.029$ & $0.759 \pm 0.022$ & $0.801 \pm 0.015$ & --- & $0.131$ \\
-CEM-Linear (raw) & $0.752 \pm 0.023$ & $0.735 \pm 0.025$ & $0.748 \pm 0.020$ & --- & $\mathbf{0.121}$ \\
-CEM (ours)       & $0.775 \pm 0.031$ & $0.775 \pm 0.024$ & $0.818 \pm 0.022$ & --- & $0.129$ \\
+No bottleneck    & $0.779 \pm 0.084$ & $0.778 \pm 0.063$ & --- & --- & --- \\
+CBM (scalar)     & $0.784 \pm 0.047$ & $0.778 \pm 0.042$ & $\mathbf{0.846 \pm 0.015}$ & --- & $0.140$ \\
+CEM binary       & $\mathbf{0.792 \pm 0.041}$ & $\mathbf{0.787 \pm 0.037}$ & $0.799 \pm 0.041$ & $0.744$ & $0.137$ \\
+Categorical      & $0.788 \pm 0.043$ & $0.782 \pm 0.038$ & $0.821 \pm 0.035$ & $0.678$ & $0.140$ \\
+CEM-Linear (norm)& $0.788 \pm 0.038$ & $0.778 \pm 0.036$ & $0.815 \pm 0.035$ & --- & $0.129$ \\
+CEM-Linear (raw) & $0.744 \pm 0.067$ & $0.737 \pm 0.054$ & $0.758 \pm 0.050$ & --- & $\mathbf{0.120}$ \\
+CEM (ours)       & $0.774 \pm 0.048$ & $0.765 \pm 0.057$ & $0.795 \pm 0.049$ & --- & $0.128$ \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-Note that CEM-Linear (raw) attains the \emph{lowest} concept error while giving
-the \emph{worst} task and intervention accuracy. Predicting the concepts and
-using them are separable failures: with raw magnitudes the multiplicative gate
-is dominated by one concept, so the head largely ignores the bottleneck even
-though the concept head itself trains well. \todo{Worth a sentence in the main
-text; it is a clean illustration that concept accuracy alone does not make a
-bottleneck useful.}
+Note again that CEM-Linear (raw) attains the \emph{lowest} concept error while
+giving the \emph{worst} task and intervention accuracy. Predicting the concepts
+and using them are separable failures: with raw magnitudes the multiplicative
+gate is dominated by one concept, so the head largely ignores the bottleneck
+even though the concept head itself trains well. Concept accuracy alone does
+not make a bottleneck useful.
 
-\subsection{Model sizes}
+\begin{table}[h]
+\centering
+\caption{Overfitting on LIDC. Training accuracy is the mean over 30 seeds at
+epoch 100; test balanced accuracy is from Table~\ref{tab:app-lidc-full}. With
+$944$ training volumes and no augmentation, weight decay or early stopping,
+every model that fits the data memorises it. CEM-Linear (raw) is the exception
+only because it fails to fit.}
+\label{tab:app-overfit}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Representation} & \textbf{Train acc.} & \textbf{Test balanced acc.} &
+\textbf{Gap} \\
+\midrule
+No bottleneck     & $0.997$ & $0.778$ & $0.219$ \\
+CEM binary        & $0.987$ & $0.787$ & $0.200$ \\
+Categorical       & $0.987$ & $0.782$ & $0.205$ \\
+CEM-Linear (norm) & $0.985$ & $0.778$ & $0.207$ \\
+CEM (ours)        & $0.982$ & $0.765$ & $0.217$ \\
+CBM (scalar)      & $0.957$ & $0.778$ & $0.179$ \\
+CEM-Linear (raw)  & $0.771$ & $0.737$ & $0.034$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Model sizes}\subsection{Model sizes}
 
 \begin{table}[h]
 \centering

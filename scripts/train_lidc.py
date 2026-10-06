@@ -72,11 +72,12 @@ def get_device(override=None):
 # ---------------------------------------------------------------------------
 
 class LIDCNodules(Dataset):
-    def __init__(self, frame, transform, data_cfg, augment=False):
+    def __init__(self, frame, transform, data_cfg, augment=False, jitter=3):
         self.frame = frame.reset_index(drop=True)
         self.transform = transform
         self.cfg = data_cfg
         self.augment = augment
+        self.jitter = jitter
         self.dir = Path(data_cfg.data_dir) / "cubes"
 
     def __len__(self):
@@ -89,13 +90,19 @@ class LIDCNodules(Dataset):
         cube = (np.clip(cube, lo, hi) - lo) / (hi - lo)
 
         if self.augment:
-            # Nodules have no canonical orientation, so flips and axis swaps
-            # are label-preserving and free.
+            # Only ISOMETRIES are allowed. Three of the concepts are diameter,
+            # volume and surface area, so anything that rescales or deforms the
+            # cube would silently corrupt their labels. Axis permutation plus
+            # per-axis flips covers all 48 symmetries of a cube exactly, with
+            # no interpolation; a small roll removes the "always dead centre"
+            # shortcut without changing any geometry.
+            cube = np.transpose(cube, random.sample(range(3), 3))
             for ax in range(3):
                 if random.random() < 0.5:
                     cube = np.flip(cube, axis=ax)
-            if random.random() < 0.5:
-                cube = np.rot90(cube, k=random.randint(1, 3), axes=(0, 1))
+            if self.jitter:
+                cube = np.roll(cube, [random.randint(-self.jitter, self.jitter)
+                                      for _ in range(3)], axis=(0, 1, 2))
             cube = np.ascontiguousarray(cube)
 
         x = torch.from_numpy(cube).unsqueeze(0)
@@ -181,7 +188,8 @@ def evaluate(model, loader, transform, device, concepts, raw_test):
 
 
 def train_one(seed, backbone_cfg, cem_cfg, train_cfg, data_cfg,
-              variant, device, augment, class_weight, verbose=True):
+              variant, device, augment, class_weight, verbose=True,
+              weight_decay=0.0):
     """`variant` is a dict: {bottleneck, concept_mode, scaling, n_bins}."""
     set_seed(seed)
     train_df, test_df = load_split(data_cfg, seed)
@@ -193,7 +201,8 @@ def train_one(seed, backbone_cfg, cem_cfg, train_cfg, data_cfg,
     raw_test = test_df[concepts].values.astype("float32")
 
     train_loader = DataLoader(
-        LIDCNodules(train_df, transform, data_cfg, augment=augment),
+        LIDCNodules(train_df, transform, data_cfg, augment=augment,
+                    jitter=3 if augment else 0),
         batch_size=train_cfg.batch_size, shuffle=True,
         num_workers=train_cfg.num_workers)
     test_loader = DataLoader(
@@ -218,7 +227,10 @@ def train_one(seed, backbone_cfg, cem_cfg, train_cfg, data_cfg,
         counts = np.bincount(train_df.label.values, minlength=2)
         w = torch.tensor(counts.sum() / (2.0 * counts), dtype=torch.float, device=device)
     task_crit = nn.CrossEntropyLoss(weight=w)
-    opt = torch.optim.Adam(model.parameters(), lr=train_cfg.lr)
+    opt = (torch.optim.AdamW(model.parameters(), lr=train_cfg.lr,
+                             weight_decay=weight_decay)
+           if weight_decay > 0 else
+           torch.optim.Adam(model.parameters(), lr=train_cfg.lr))
 
     def concept_loss(pred, target):
         if pred is None:
@@ -304,7 +316,15 @@ def main():
     ap.add_argument("--hidden-dim", type=int)
     ap.add_argument("--depth", type=int)
     ap.add_argument("--min-annotations", type=int)
-    ap.add_argument("--augment", action="store_true")
+    ap.add_argument("--augment", action="store_true",
+                    help="Random cube symmetries (all 48) plus +/-3 voxel jitter. "
+                         "Isometries only, so the geometric concepts stay valid.")
+    ap.add_argument("--weight-decay", type=float, default=0.0,
+                    help="AdamW weight decay. 0 keeps plain Adam (the default so "
+                         "far, which overfits badly on 944 volumes).")
+    ap.add_argument("--backbone-dropout", type=float, default=None,
+                    help="Dropout3d after each encoder block, overriding the "
+                         "backbone config (currently 0.0).")
     ap.add_argument("--no-class-weight", action="store_true",
                     help="Disable class balancing (it is on by default).")
     ap.add_argument("--device", default=None, choices=["cuda", "mps", "cpu"])
@@ -327,6 +347,8 @@ def main():
     if args.hidden_dim:       cem_cfg.hidden_dim = args.hidden_dim
     if args.depth:            cem_cfg.depth = args.depth
     if args.min_annotations:  data_cfg.min_annotations = args.min_annotations
+    if args.backbone_dropout is not None:
+        backbone_cfg.dropout = args.backbone_dropout
     cem_cfg.n_concepts = len(data_cfg.concepts)
 
     device = get_device(args.device)
@@ -342,7 +364,8 @@ def main():
           f"| concept_weight {train_cfg.concept_weight} "
           f"| intervention_prob {train_cfg.intervention_prob}")
     print(f"concepts ({len(data_cfg.concepts)}): {data_cfg.concepts}")
-    print(f"min_annotations {data_cfg.min_annotations} | augment {args.augment}\n")
+    print(f"min_annotations {data_cfg.min_annotations} | augment {args.augment} "
+          f"| weight_decay {args.weight_decay} | backbone dropout {backbone_cfg.dropout}\n")
 
     name = args.tag or args.bottleneck
     hist_path = Path("outputs/logs") / f"lidc_{name}_history.csv"
@@ -357,7 +380,8 @@ def main():
         seed = args.seed + r
         print(f"=== seed {seed} ({r+1}/{args.runs}) ===", flush=True)
         res = train_one(seed, backbone_cfg, cem_cfg, train_cfg, data_cfg,
-                        variant, device, args.augment, not args.no_class_weight)
+                        variant, device, args.augment, not args.no_class_weight,
+                        weight_decay=args.weight_decay)
 
         # Append this seed's epoch curve immediately, so an interrupted job
         # still leaves a plottable record.
