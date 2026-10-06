@@ -1,0 +1,2 @@
+bottleneck,concept_mode,scaling,n_bins,runs,epochs,conv_channels,embedding_dim,concept_weight,intervention_prob,accuracy_mean,accuracy_std,balanced_accuracy_mean,balanced_accuracy_std,params_mean,params_std,size_mb_mean,size_mb_std
+none,continuous,minmax,5,10,100,16-32-64-128,16,1.0,0.25,0.7638725757598877,0.11144570087172269,0.7629004754126072,0.08144858721783552,291714.0,0.0,1.1668559999999997,2.220446049250313e-16
