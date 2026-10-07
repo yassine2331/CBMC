@@ -1,2 +1,2 @@
 bottleneck,concept_mode,scaling,n_bins,runs,epochs,conv_channels,embedding_dim,concept_weight,intervention_prob,accuracy_mean,accuracy_std,balanced_accuracy_mean,balanced_accuracy_std,params_mean,params_std,size_mb_mean,size_mb_std
-none,continuous,minmax,5,30,100,16-32-64-128,16,1.0,0.25,0.7785956919193268,0.0836154025315464,0.777674333502849,0.06322559396641995,291714.0,0.0,1.166856,0.0
+none,continuous,minmax,5,15,250,16-32-64-128,16,1.0,0.25,0.8470612128575643,0.029369796172476828,0.8412721375624339,0.027101323332129994,291714.0,0.0,1.1668559999999997,2.220446049250313e-16
