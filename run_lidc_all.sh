@@ -131,7 +131,7 @@ echo "Start:     $(date)"
 echo "========================================"
 
 MAMBA_CMD="mamba run -p ./env"
-usage () { sed -n '2,/^# ====.*$/p' "$0" | sed 's/^# \{0,1\}//'; }
+usage () { sed -n '4,/^# ====.*$/p' "$0" | sed 's/^# \{0,1\}//'; }
 
 EPOCHS="${EPOCHS:-60}"
 RUNS="${RUNS:-5}"

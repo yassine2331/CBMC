@@ -54,6 +54,12 @@ from cbmc.data import concept_transforms as CT
 
 CFG = Path("experiments/configs")
 
+# Every column of nodules.csv usable as a concept with --concepts. malignancy is
+# left out on purpose: the label is derived from it.
+ALL_CONCEPTS = ["subtlety", "sphericity", "margin", "lobulation", "spiculation",
+                "texture", "diameter", "volume", "surface_area",
+                "internalStructure", "calcification"]
+
 
 def set_seed(s):
     random.seed(s); np.random.seed(s)
@@ -316,6 +322,10 @@ def main():
     ap.add_argument("--hidden-dim", type=int)
     ap.add_argument("--depth", type=int)
     ap.add_argument("--min-annotations", type=int)
+    ap.add_argument("--concepts", nargs="+", default=None, metavar="NAME",
+                    help="Train on this subset of concepts instead of the list in "
+                         "lidc_data.json (for the concept-incompleteness test). "
+                         f"Choose from: {' '.join(ALL_CONCEPTS)}")
     ap.add_argument("--augment", action="store_true",
                     help="Random cube symmetries (all 48) plus +/-3 voxel jitter. "
                          "Isometries only, so the geometric concepts stay valid.")
@@ -349,6 +359,11 @@ def main():
     if args.min_annotations:  data_cfg.min_annotations = args.min_annotations
     if args.backbone_dropout is not None:
         backbone_cfg.dropout = args.backbone_dropout
+    if args.concepts:
+        bad = [c for c in args.concepts if c not in ALL_CONCEPTS]
+        if bad:
+            ap.error(f"unknown concept(s) {bad}. Choose from: {' '.join(ALL_CONCEPTS)}")
+        data_cfg.concepts = list(dict.fromkeys(args.concepts))   # dedupe, keep order
     cem_cfg.n_concepts = len(data_cfg.concepts)
 
     device = get_device(args.device)
@@ -396,7 +411,8 @@ def main():
         runs.append(res)
         print(f"  accuracy {res['accuracy']:.3f}  balanced "
               f"{res['balanced_accuracy']:.3f}  (history -> {hist_path})\n", flush=True)
-        write_results(args, train_cfg, backbone_cfg, cem_cfg, runs)   # after EVERY seed
+        write_results(args, train_cfg, backbone_cfg, cem_cfg, runs,
+                      data_cfg.concepts)   # after EVERY seed
 
     keys = [k for k in runs[0] if isinstance(runs[0][k], float) or k == "params"]
     print("=" * 72)
@@ -423,7 +439,7 @@ def result_path(args):
     return out.with_name(f"{out.stem}_{args.tag}{out.suffix}") if args.tag else out
 
 
-def write_results(args, train_cfg, backbone_cfg, cem_cfg, runs):
+def write_results(args, train_cfg, backbone_cfg, cem_cfg, runs, concepts):
     """Rewrite the result CSV from whatever seeds have finished so far."""
     keys = [k for k in runs[0] if isinstance(runs[0][k], float) or k == "params"]
     out = result_path(args)
@@ -432,13 +448,13 @@ def write_results(args, train_cfg, backbone_cfg, cem_cfg, runs):
         w = csv.writer(f)
         w.writerow(["bottleneck", "concept_mode", "scaling", "n_bins", "runs",
                     "epochs", "conv_channels", "embedding_dim",
-                    "concept_weight", "intervention_prob"]
+                    "concept_weight", "intervention_prob", "concepts"]
                    + [f"{k}_{s}" for k in keys for s in ("mean", "std")])
         w.writerow([args.bottleneck, args.concept_mode, args.concept_scaling,
                     args.n_bins, len(runs), train_cfg.epochs,
                     "-".join(map(str, backbone_cfg.conv_channels)),
                     cem_cfg.embedding_dim, train_cfg.concept_weight,
-                    train_cfg.intervention_prob]
+                    train_cfg.intervention_prob, "+".join(concepts)]
                    + [v for k in keys
                       for v in (float(np.mean([r[k] for r in runs])),
                                 float(np.std([r[k] for r in runs])))])
