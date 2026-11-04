@@ -205,3 +205,21 @@ To reproduce a run exactly:
 ```bash
 python scripts/train.py --model vae --config outputs/vae_baseline/model_config.json
 ```
+
+---
+
+## Shapes3D generation
+
+Concept-bottleneck VAEs on DeepMind's 3dshapes (6 ground-truth factors as concepts).
+Put `3dshapes.h5` in `data/raw/3dshapes/` (gitignored), then either open
+`notebooks/shapes3d_generation.ipynb` and pick `MODEL` in the first cell, or:
+
+```bash
+python scripts/train_shapes3d_gen.py --model case3.5 --epochs 20   # cem
+python scripts/train_shapes3d_gen.py --model case3 --n-bins 5      # binned
+```
+
+Models: `vae`/`baseline`, `cbm`, `cem`/`case3.5`, `cem_linear`, `categorical`/`case2`,
+`binned`/`case3`. Saved to `outputs/models/shapes3d_<model>[_<tag>]/` and reloaded with
+`scripts.train_shapes3d_gen.load(...)`, whose `.generate(concepts={...})` works the same
+for every model. Loader: `cbmc.data.shapes3d`.

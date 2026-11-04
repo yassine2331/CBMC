@@ -6,3 +6,5 @@ accelerate>=0.30
 matplotlib=3.10.8
 datasets>=0.1.2
 sympytorch=0.1.4pythae
+
+h5py
