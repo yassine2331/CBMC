@@ -354,6 +354,9 @@ def train(
     backbone_cfg: Optional[ConvVAEConfig] = None,
     bottleneck_cfg=None,
     train_cfg: Optional[TrainConfig] = None,
+    backbone_overrides: Optional[dict] = None,
+    bottleneck_overrides: Optional[dict] = None,
+    resume: bool = False,
     **train_overrides,
 ) -> Generator:
     """
@@ -361,7 +364,14 @@ def train(
 
     train_overrides set TrainConfig fields directly, e.g. lr=5e-4,
     concept_weight=50, intervention_prob=0.25, batch_size=128.
+    backbone_overrides / bottleneck_overrides set ConvVAEConfig / bottleneck
+    config fields, e.g. {"latent_dim": 64} / {"embedding_dim": 32}; keys the
+    bottleneck does not have (embedding_dim on a CBM) are skipped.
     Pass `loaders=(train_loader, test_loader)` to reuse already-loaded data.
+
+    The model is saved after EVERY epoch. With resume=True an existing
+    checkpoint in the output folder is continued from its last epoch (its saved
+    configs win over the arguments); a finished one is just loaded.
     """
     name = resolve(model)
     device = get_device(device)
@@ -378,6 +388,31 @@ def train(
         if not hasattr(train_cfg, k):
             raise TypeError(f"unknown training option {k!r}")
         setattr(train_cfg, k, v)
+    for k, v in (backbone_overrides or {}).items():
+        if not hasattr(backbone_cfg, k):
+            raise TypeError(f"unknown backbone option {k!r}")
+        setattr(backbone_cfg, k, v)
+    for k, v in (bottleneck_overrides or {}).items():
+        if bottleneck_cfg is not None and hasattr(bottleneck_cfg, k):
+            setattr(bottleneck_cfg, k, v)
+
+    out = Path(out_dir) if out_dir else default_out_dir(name, tag)
+    ckpt, start_epoch, history = None, 1, []
+    if resume and (out / "model.pt").exists():
+        ckpt = torch.load(out / "model.pt", map_location="cpu", weights_only=False)
+        _, bcls, _ = MODELS[name]
+        backbone_cfg   = ConvVAEConfig(**ckpt["backbone_cfg"])
+        bottleneck_cfg = bcls(**ckpt["bottleneck_cfg"]) if bcls else None
+        saved_epochs   = TrainConfig(**ckpt["train_cfg"]).epochs
+        train_cfg      = TrainConfig(**{**ckpt["train_cfg"], "epochs": max(train_cfg.epochs, saved_epochs)})
+        space = ConceptSpace.from_dict(ckpt["concept_space"]) if ckpt["concept_space"] else None
+        n_samples = ckpt.get("data_cfg", {}).get("n_samples", n_samples)
+        start_epoch = ckpt.get("epoch", train_cfg.epochs) + 1
+        history = ckpt.get("history", [])
+        if start_epoch > train_cfg.epochs:
+            print(f"{out} already trained for {start_epoch - 1} epochs -- loading it.")
+            return load(out, device)
+        print(f"Resuming {name} from epoch {start_epoch}/{train_cfg.epochs}")
 
     set_seed(train_cfg.seed)
     if loaders is None:
@@ -390,16 +425,19 @@ def train(
     gen = Generator(name, net, space, backbone_cfg, bottleneck_cfg, train_cfg, device,
                     data_cfg={"n_samples": n_samples, "seed": train_cfg.seed})
     opt = torch.optim.Adam(net.parameters(), lr=train_cfg.lr)
-    out = Path(out_dir) if out_dir else default_out_dir(name, tag)
+    if ckpt is not None:
+        net.load_state_dict(ckpt["model_state_dict"])
+        if "optimizer_state_dict" in ckpt:
+            opt.load_state_dict(ckpt["optimizer_state_dict"])
+    n_params = sum(p.numel() for p in net.parameters())
     fixed_x = next(iter(test_loader))[0][:8].to(device)
 
-    print(f"Training {name} on {device} -> {out}")
+    print(f"Training {name} on {device} -> {out}  ({n_params / 1e6:.2f}M params)")
     if space:
         print(f"  concepts {space.names} | mode {space.mode}"
               + (f" | states {space.n_states}" if space.is_discrete else ""))
     kl_warmup = max(1, min(5, train_cfg.epochs // 2))
-    history = []
-    for epoch in range(1, train_cfg.epochs + 1):
+    for epoch in range(start_epoch, train_cfg.epochs + 1):
         net.train()
         kl_w = min(epoch / kl_warmup, 1.0) * backbone_cfg.kl_weight
         sums, n = [0.0, 0.0, 0.0, 0.0], 0
@@ -423,8 +461,9 @@ def train(
         recon_fix = gen.reconstruct(fixed_x)
         prior = gen.generate(8, seed=epoch)
         _save_grid([fixed_x.float().div(255), recon_fix, prior], str(out / "samples" / f"epoch_{epoch:03d}.png"))
+        save(gen, out, history, optimizer=opt, epoch=epoch, quiet=True)   # survives a killed job
 
-    save(gen, out, history)
+    save(gen, out, history, optimizer=opt, epoch=train_cfg.epochs)
     return gen
 
 
@@ -432,10 +471,20 @@ def train(
 # Save / load
 # ---------------------------------------------------------------------------
 
-def save(gen: Generator, out_dir, history=None):
+def save(gen: Generator, out_dir, history=None, optimizer=None, epoch=None, quiet=False):
+    """
+    Write model.pt (+ readable JSON configs and metrics.csv) to out_dir.
+    The curves are also copied to outputs/logs/<run>.csv, which git tracks,
+    so they travel with a plain git pull even though the weights do not.
+    """
+    import json
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
+    tmp = out / "model.pt.tmp"            # write-then-rename: never a half-written model.pt
     torch.save({
+        "epoch":            epoch,
+        "history":          history or [],
+        "optimizer_state_dict": optimizer.state_dict() if optimizer is not None else None,
         "model_name":       gen.name,
         "model_state_dict": gen.model.state_dict(),
         "backbone_cfg":     gen.backbone_cfg.to_dict(),
@@ -443,16 +492,22 @@ def save(gen: Generator, out_dir, history=None):
         "train_cfg":        gen.train_cfg.to_dict(),
         "concept_space":    gen.space.to_dict() if gen.space else None,
         "data_cfg":         gen.data_cfg,
-    }, out / "model.pt")
-    gen.backbone_cfg.save(str(out / "backbone_config.json"))
-    if gen.bottleneck_cfg:
-        gen.bottleneck_cfg.save(str(out / "bottleneck_config.json"))
-    gen.train_cfg.save(str(out / "train_config.json"))
+    }, tmp)
+    os.replace(tmp, out / "model.pt")
+    for fname, cfg in [("backbone_config.json", gen.backbone_cfg),
+                       ("bottleneck_config.json", gen.bottleneck_cfg),
+                       ("train_config.json", gen.train_cfg)]:
+        if cfg is not None:
+            (out / fname).write_text(json.dumps(cfg.to_dict(), indent=2))
     if history:
-        with open(out / "metrics.csv", "w", newline="") as f:
-            w = csv.DictWriter(f, fieldnames=list(history[0]))
-            w.writeheader(); w.writerows(history)
-    print(f"Saved {gen.name} -> {out}")
+        logs = ROOT / "outputs" / "logs"
+        logs.mkdir(parents=True, exist_ok=True)
+        for path in (out / "metrics.csv", logs / f"{out.name}.csv"):
+            with open(path, "w", newline="") as f:
+                w = csv.DictWriter(f, fieldnames=list(history[0]))
+                w.writeheader(); w.writerows(history)
+    if not quiet:
+        print(f"Saved {gen.name} -> {out}")
 
 
 def load(checkpoint_dir, device: Optional[str] = None) -> Generator:
@@ -494,15 +549,45 @@ def main():
     ap.add_argument("--lr", type=float, default=None)
     ap.add_argument("--batch-size", type=int, default=None)
     ap.add_argument("--seed", type=int, default=None)
-    ap.add_argument("--tag", default=None)
+    ap.add_argument("--num-workers", type=int, default=None)
+    # backbone (ConvVAEConfig)
+    ap.add_argument("--latent-dim", type=int, default=None)
+    ap.add_argument("--enc-channels", type=int, nargs="+", default=None, help='e.g. 32 64 128 256')
+    ap.add_argument("--dec-channels", type=int, nargs="+", default=None,
+                    help="same length as --enc-channels; default mirrors it")
+    ap.add_argument("--kl-weight", type=float, default=None)
+    # bottleneck (CEMConfig / CEMCategoricalConfig; ignored by vae and cbm)
+    ap.add_argument("--embedding-dim", type=int, default=None)
+    ap.add_argument("--hidden-dim", type=int, default=None)
+    ap.add_argument("--depth", type=int, default=None)
+    ap.add_argument("--dropout", type=float, default=None)
+    # output
+    ap.add_argument("--tag", default=None, help="folder suffix: shapes3d_<model>_<tag>")
+    ap.add_argument("--out-dir", default=None, help="explicit output folder (overrides --tag)")
+    ap.add_argument("--resume", action="store_true",
+                    help="continue an existing checkpoint in the output folder; skip it if finished")
     ap.add_argument("--device", default=None, choices=["cuda", "mps", "cpu"])
     a = ap.parse_args()
-    overrides = {k: v for k, v in dict(concept_weight=a.concept_weight,
-                                       intervention_prob=a.intervention_prob, lr=a.lr,
-                                       cycle_weight=a.cycle_weight,
-                                       batch_size=a.batch_size, seed=a.seed).items() if v is not None}
+
+    def pick(**kw):
+        return {k: v for k, v in kw.items() if v is not None}
+
+    dec = a.dec_channels
+    if a.enc_channels and not dec:
+        dec = list(reversed(a.enc_channels[:-1])) + [a.enc_channels[0]]
+    if a.enc_channels and len(dec) != len(a.enc_channels):
+        ap.error("--dec-channels must have as many entries as --enc-channels")
+
     train(a.model, epochs=a.epochs, concepts=a.concepts, n_bins=a.n_bins,
-          n_samples=a.n_samples or None, tag=a.tag, device=a.device, **overrides)
+          n_samples=a.n_samples or None, tag=a.tag, out_dir=a.out_dir, device=a.device,
+          resume=a.resume,
+          backbone_overrides=pick(latent_dim=a.latent_dim, enc_channels=a.enc_channels,
+                                  dec_channels=dec, kl_weight=a.kl_weight),
+          bottleneck_overrides=pick(embedding_dim=a.embedding_dim, hidden_dim=a.hidden_dim,
+                                    depth=a.depth, dropout=a.dropout),
+          **pick(concept_weight=a.concept_weight, intervention_prob=a.intervention_prob,
+                 lr=a.lr, cycle_weight=a.cycle_weight, batch_size=a.batch_size,
+                 seed=a.seed, num_workers=a.num_workers))
 
 
 if __name__ == "__main__":
