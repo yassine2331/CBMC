@@ -41,7 +41,7 @@
 #    bash   run_shapes3d.sh --help
 #
 #  Every flag also reads an env var: EPOCHS, N_SAMPLES, N_BINS, BATCH_SIZE, LR,
-#  CONCEPT_WEIGHT, INTERVENTION_PROB, CYCLE_WEIGHT, LATENT_DIM, ENC_CHANNELS,
+#  CONCEPTS, CONCEPT_WEIGHT, INTERVENTION_PROB, CYCLE_WEIGHT, LATENT_DIM, ENC_CHANNELS,
 #  KL_WEIGHT, EMBEDDING_DIM, HIDDEN_DIM, DEPTH, SEED, SUFFIX, DEVICE, ONLY.
 #
 #
@@ -51,6 +51,8 @@
 #    --n-samples N           random subset of the 480k images   default 200000
 #                            (0 = all; ~6 GB RAM, ~2.4x slower than 200k)
 #    --n-bins N              bins per concept for `binned`      default 5
+#    --concepts "A B ..."    subset of the 6 factors            default all 6
+#                            e.g. --concepts "floor_hue wall_hue object_hue scale orientation"
 #    --batch-size N                                             default 256
 #    --lr LR                                                    default 1e-3
 #    --concept-weight W      weight on the concept loss         default 100
@@ -126,6 +128,7 @@ usage () { sed -n '2,/^# ====.*$/p' "$0" | sed 's/^# \{0,1\}//'; }
 EPOCHS="${EPOCHS:-30}"
 N_SAMPLES="${N_SAMPLES:-200000}"
 N_BINS="${N_BINS:-5}"
+CONCEPTS="${CONCEPTS:-}"
 BATCH_SIZE="${BATCH_SIZE:-}"
 LR="${LR:-}"
 CONCEPT_WEIGHT="${CONCEPT_WEIGHT:-}"
@@ -156,6 +159,7 @@ while [ $# -gt 0 ]; do
         --epochs)              EPOCHS="$2" ;;
         --n-samples)           N_SAMPLES="$2" ;;
         --n-bins)              N_BINS="$2" ;;
+        --concepts)            CONCEPTS="$2" ;;
         --batch-size)          BATCH_SIZE="$2" ;;
         --lr)                  LR="$2" ;;
         --concept-weight)      CONCEPT_WEIGHT="$2" ;;
@@ -232,6 +236,7 @@ fi
 
 # --- build the python arguments ---------------------------------------------
 COMMON="--epochs $EPOCHS --n-samples $N_SAMPLES --n-bins $N_BINS"
+[ -n "$CONCEPTS" ]          && COMMON="$COMMON --concepts $CONCEPTS"
 [ -n "$BATCH_SIZE" ]        && COMMON="$COMMON --batch-size $BATCH_SIZE"
 [ -n "$LR" ]                && COMMON="$COMMON --lr $LR"
 [ -n "$CONCEPT_WEIGHT" ]    && COMMON="$COMMON --concept-weight $CONCEPT_WEIGHT"
