@@ -170,9 +170,11 @@ def load_shapes3d_arrays(
     n_samples: Optional[int] = 100_000,
     seed: int = 42,
     concepts: Sequence[str] = FACTOR_NAMES,
+    indices: Optional[np.ndarray] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
-    Read a random subset of the h5 file into memory.
+    Read a random subset of the h5 file into memory (or exactly `indices`,
+    positions in the h5 file, when given -- returned in sorted order).
 
     The file is ordered factor by factor, so a contiguous slice would cover
     only a few floor hues -- the subset is a random draw over the whole file,
@@ -192,7 +194,9 @@ def load_shapes3d_arrays(
     with h5py.File(h5_path, "r") as f:
         total = f["images"].shape[0]
         labels = f["labels"][:]                                   # [N, 6] float64, small
-        if n_samples is None or n_samples >= total:
+        if indices is not None:
+            idx = np.unique(np.asarray(indices))
+        elif n_samples is None or n_samples >= total:
             idx = np.arange(total)
         else:
             idx = np.sort(np.random.RandomState(seed).choice(total, n_samples, replace=False))
@@ -232,3 +236,27 @@ def get_shapes3d(
     print(f"Shapes3D: {len(train)} train / {len(test)} test, concepts={list(concepts)}")
     return (DataLoader(train, batch_size=batch_size, shuffle=True, num_workers=num_workers, drop_last=True),
             DataLoader(test,  batch_size=batch_size, shuffle=False, num_workers=num_workers))
+
+
+def held_out_indices(n_samples: Optional[int] = 100_000, seed: int = 42,
+                     test_size: float = 0.1, total: int = 480_000) -> np.ndarray:
+    """
+    h5 positions of the TEST split that get_shapes3d(n_samples, seed, test_size)
+    produces -- i.e. images a model trained with those settings never saw.
+    Reproduces the same subset draw and the same shuffle without loading images.
+    """
+    if n_samples is None or n_samples >= total:
+        idx = np.arange(total)
+    else:
+        idx = np.sort(np.random.RandomState(seed).choice(total, n_samples, replace=False))
+    perm = torch.randperm(len(idx), generator=torch.Generator().manual_seed(seed)).numpy()
+    return idx[perm[:int(len(idx) * test_size)]]
+
+
+def get_held_out(n_samples: Optional[int] = 100_000, seed: int = 42, max_images: int = 10_000,
+                 concepts: Sequence[str] = FACTOR_NAMES, h5_path: str | Path = DEFAULT_H5,
+                 test_size: float = 0.1):
+    """(images uint8, raw concepts, shape idx) for up to max_images held-out test images."""
+    te = held_out_indices(n_samples, seed, test_size)
+    te = te[np.random.RandomState(0).permutation(len(te))[:max_images]]
+    return load_shapes3d_arrays(h5_path, concepts=concepts, indices=te)

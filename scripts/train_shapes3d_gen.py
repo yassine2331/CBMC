@@ -400,6 +400,12 @@ def train(
     ckpt, start_epoch, history = None, 1, []
     if resume and (out / "model.pt").exists():
         ckpt = torch.load(out / "model.pt", map_location="cpu", weights_only=False)
+        saved = (ckpt.get("concept_space") or {}).get("names")
+        if space is not None and saved is not None and list(saved) != list(space.names):
+            raise SystemExit(
+                f"ERROR: {out} was trained with concepts {saved}, but you asked for "
+                f"{list(space.names)}. Use a different --tag/--suffix (or --out-dir) "
+                f"for the new concept set, or drop --resume to overwrite it.")
         _, bcls, _ = MODELS[name]
         backbone_cfg   = ConvVAEConfig(**ckpt["backbone_cfg"])
         bottleneck_cfg = bcls(**ckpt["bottleneck_cfg"]) if bcls else None

@@ -9,7 +9,9 @@ The original loaders from the CBMC-test repo live in `legacy/`.
 from .dataset import (
     FACTORS, FACTOR_NAMES, NOMINAL, DEFAULT_H5,
     ConceptSpace, load_shapes3d_arrays, get_shapes3d,
+    held_out_indices, get_held_out,
 )
 
 __all__ = ["FACTORS", "FACTOR_NAMES", "NOMINAL", "DEFAULT_H5",
-           "ConceptSpace", "load_shapes3d_arrays", "get_shapes3d"]
+           "ConceptSpace", "load_shapes3d_arrays", "get_shapes3d",
+           "held_out_indices", "get_held_out"]

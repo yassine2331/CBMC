@@ -36,6 +36,7 @@
 #    sbatch run_shapes3d.sh --only "cem binned vae"  # a subset (aliases ok:
 #                                                    #  baseline case2 case3 case3.5)
 #    sbatch run_shapes3d.sh --n-bins 10 --suffix k10 # keep runs apart
+#    (a new --concepts set ALSO needs its own --suffix, or resume refuses)
 #    bash   run_shapes3d.sh --parallel               # ONE JOB PER VARIANT, so
 #                                                    # they run side by side
 #    bash   run_shapes3d.sh --help
@@ -214,6 +215,11 @@ VARIANTS="${VARIANTS# }"
 
 # --- parallel mode: one job per variant ---------------------------------------
 if [ -n "$PARALLEL" ]; then
+    if [ -n "${SLURM_JOB_ID:-}" ]; then
+        echo "ERROR: --parallel submits jobs itself; run it on the login node with" >&2
+        echo "       bash run_shapes3d.sh ... --parallel   (not sbatch)" >&2
+        exit 1
+    fi
     mkdir -p logs
     for v in $VARIANTS; do
         echo "+ sbatch --job-name=cbmc-s3d-$v $0 ${FORWARD[*]} --only $v"
