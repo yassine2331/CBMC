@@ -126,9 +126,9 @@ H5_URL="https://storage.googleapis.com/3d-shapes/3dshapes.h5"
 
 usage () { sed -n '2,/^# ====.*$/p' "$0" | sed 's/^# \{0,1\}//'; }
 
-EPOCHS="${EPOCHS:-30}"
-N_SAMPLES="${N_SAMPLES:-200000}"
-N_BINS="${N_BINS:-5}"
+EPOCHS="${EPOCHS:-60}"
+N_SAMPLES="${N_SAMPLES:-300000}"
+N_BINS="${N_BINS:-10}"
 CONCEPTS="${CONCEPTS:-}"
 BATCH_SIZE="${BATCH_SIZE:-}"
 LR="${LR:-}"
