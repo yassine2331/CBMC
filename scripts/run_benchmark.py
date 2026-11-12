@@ -5,7 +5,8 @@ One benchmark for every dataset x concept representation x seed.
 
 Models (same encoder, head and training loop; only the bottleneck differs):
 
-    cbm             scalar bottleneck: the head sees k numbers
+    cbm             scalar bottleneck: the head sees k numbers (per-concept MLP
+                    predictor, same size as the CEM concept networks)
     cem             two anchors, continuous interpolation        OUR METHOD (Case 3.5)
     cem_linear      one embedding x concept value, LayerNorm
     cem_linear_raw  one embedding x concept value, NO LayerNorm  (the paper's CEM-Linear-Raw)
@@ -71,7 +72,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset, Subset
 
-from cbmc.concepts.cem import CEM, CEMLinear, CEMLinearRaw
+from cbmc.concepts.cem import CEM, CEMLinear, CEMLinearRaw, _mlp
 from cbmc.concepts.categorical import CEMCategoricalPerConcept
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -267,7 +268,9 @@ class ConceptModel(nn.Module):
         if kind == "nn":
             self.head = nn.Sequential(nn.Linear(d, 256), nn.ReLU(), nn.Linear(256, n_out))
         elif kind == "cbm":
-            self.cbm = nn.Linear(d, n_concepts)
+            # one MLP per concept, same width/depth/dropout as the CEM concept networks
+            # (a single Linear here made CBM's concepts ~9x worse: an unfair baseline)
+            self.cbm = nn.ModuleList([_mlp(d, hidden, 1, depth, dropout) for _ in range(n_concepts)])
             self.head = nn.Sequential(nn.Linear(n_concepts, 32), nn.ReLU(),
                                       nn.Linear(32, 32), nn.ReLU(), nn.Linear(32, n_out))
         else:
@@ -283,7 +286,7 @@ class ConceptModel(nn.Module):
         if self.kind == "nn":
             return self.head(h), None
         if self.kind == "cbm":
-            c = self.cbm(h)
+            c = torch.cat([m(h) for m in self.cbm], 1)
             used = c
             if interv is not None:
                 used = interv if mask is None else mask * interv + (1 - mask) * c
