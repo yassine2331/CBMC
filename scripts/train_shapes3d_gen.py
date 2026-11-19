@@ -23,7 +23,11 @@ From Python / a notebook:
     imgs = gen.generate(n=8, concepts={"shape": 2, "object_hue": 0.3}, seed=0)
 
 Saved to outputs/models/shapes3d_<model>[_<tag>]/:
-    model.pt              state_dict + every config + the ConceptSpace
+    model.pt              LAST epoch: state_dict + every config + the ConceptSpace
+                          (+ optimizer, so training can resume)
+    best.pt               epoch with the lowest validation score
+                          (val recon + concept_weight * val concept MSE), same format
+                          load(dir) -> last, load(dir, which="best") -> best
     *_config.json         the same configs, human-readable
     metrics.csv           per-epoch train/test curves
     samples/epoch_XXX.png originals | reconstructions | prior samples
@@ -104,7 +108,7 @@ def set_seed(seed):
 
 def default_configs(name: str, space: Optional[ConceptSpace]):
     """Sensible Shapes3D defaults; override any field after calling this."""
-    backbone = ConvVAEConfig(in_channels=3, enc_channels=[32, 64, 128, 256], latent_dim=32,
+    backbone = ConvVAEConfig(in_channels=3, enc_channels=[32, 64, 128, 256], latent_dim=16,
                              dec_channels=[128, 64, 32, 32], img_size=64, kl_weight=1.0)
     _, bcls, _ = MODELS[name]
     if bcls is None:
@@ -120,8 +124,10 @@ def default_configs(name: str, space: Optional[ConceptSpace]):
                                           dropout=0.0, normalize=True)
     # cycle_weight > 0 is what makes interventions actually change the image;
     # without it the decoder learns to read everything from z (see _cycle_step).
-    train_cfg = TrainConfig(epochs=20, lr=1e-3, batch_size=256, seed=42, num_workers=0,
-                            concept_weight=100.0, intervention_prob=0.5, cycle_weight=100.0)
+    # concept_on_mu: also supervise concepts read from the posterior mean (see _losses)
+    train_cfg = TrainConfig(epochs=50, lr=1e-3, batch_size=256, seed=42, num_workers=0,
+                            concept_weight=100.0, intervention_prob=0.5, cycle_weight=100.0,
+                            concept_on_mu=True)
     return backbone, bottleneck, train_cfg
 
 
@@ -266,6 +272,14 @@ def _losses(gen: Generator, x, c_raw, kl_w, intervene: bool):
             closs = torch.zeros((), device=x01.device)       # CBM returns the interventions
         else:
             closs = F.mse_loss(pred, target)
+        if gen.train_cfg.concept_on_mu:
+            # The test-time path (evaluate, reconstruct, encode) reads concepts from
+            # z = mu. Trained only on sampled z, a bottleneck can lean on the N(0,1)
+            # noise of unused latent dims and break at mu (seen for CEM: floor_hue
+            # MSE 0.0013 sampled vs 0.145 at mu). Supervise both paths.
+            pm = _concepts_of(gen, mu)
+            cmu = m.concept_loss(pm, target) if space.is_discrete else F.mse_loss(pm, target)
+            closs = cmu if (gen.name == "cbm" and intervene) else 0.5 * (closs + cmu)
     recon_loss = F.binary_cross_entropy(recon, x01, reduction="sum") / x.size(0)
     kl = -0.5 * (1 + lv - mu.pow(2) - lv.exp()).sum(1).mean()
     tc = gen.train_cfg
@@ -305,7 +319,7 @@ def _cycle_step(gen: Generator, mu, c_raw, opt):
 
 
 @torch.no_grad()
-def evaluate(gen: Generator, loader, max_batches: int = 20) -> dict:
+def evaluate(gen: Generator, loader, max_batches: Optional[int] = 20) -> dict:
     """Test recon (deterministic z), concept MSE in [-1,1] units, concept accuracy."""
     gen.model.eval()
     native = ConceptSpace(gen.space.names, "categorical") if gen.space else None
@@ -313,7 +327,7 @@ def evaluate(gen: Generator, loader, max_batches: int = 20) -> dict:
     rec = cm = acc = 0.0
     nb = 0
     for i, (x, c_raw, _) in enumerate(loader):
-        if i >= max_batches:
+        if max_batches is not None and i >= max_batches:
             break
         x01 = x.to(gen.device).float().div(255)
         c_raw = c_raw.to(gen.device)
@@ -357,6 +371,7 @@ def train(
     backbone_overrides: Optional[dict] = None,
     bottleneck_overrides: Optional[dict] = None,
     resume: bool = False,
+    val_size: float = 0.05,
     **train_overrides,
 ) -> Generator:
     """
@@ -367,7 +382,13 @@ def train(
     backbone_overrides / bottleneck_overrides set ConvVAEConfig / bottleneck
     config fields, e.g. {"latent_dim": 64} / {"embedding_dim": 32}; keys the
     bottleneck does not have (embedding_dim on a CBM) are skipped.
-    Pass `loaders=(train_loader, test_loader)` to reuse already-loaded data.
+    Pass `loaders=(train_loader, val_loader, test_loader)` to reuse already-loaded
+    data (a 2-tuple (train, test) also works, but then the best model is picked
+    on the test split -- avoid that for reported numbers).
+
+    Two checkpoints: model.pt (last epoch, used for resuming) and best.pt (lowest
+    validation score = val recon + concept_weight * val concept MSE; val recon
+    alone for the plain VAE). val_size is the fraction of images held out for it.
 
     The model is saved after EVERY epoch. With resume=True an existing
     checkpoint in the output folder is continued from its last epoch (its saved
@@ -398,6 +419,7 @@ def train(
 
     out = Path(out_dir) if out_dir else default_out_dir(name, tag)
     ckpt, start_epoch, history = None, 1, []
+    best_score, best_epoch = float("inf"), None
     if resume and (out / "model.pt").exists():
         ckpt = torch.load(out / "model.pt", map_location="cpu", weights_only=False)
         saved = (ckpt.get("concept_space") or {}).get("names")
@@ -415,6 +437,9 @@ def train(
         n_samples = ckpt.get("data_cfg", {}).get("n_samples", n_samples)
         start_epoch = ckpt.get("epoch", train_cfg.epochs) + 1
         history = ckpt.get("history", [])
+        best_score = ckpt.get("best_score", float("inf"))
+        best_epoch = ckpt.get("best_epoch")
+        val_size = ckpt.get("data_cfg", {}).get("val_size", 0.0)   # keep the run's own split
         if start_epoch > train_cfg.epochs:
             print(f"{out} already trained for {start_epoch - 1} epochs -- loading it.")
             return load(out, device)
@@ -424,12 +449,18 @@ def train(
     if loaders is None:
         loaders = get_shapes3d(batch_size=train_cfg.batch_size, n_samples=n_samples,
                                seed=train_cfg.seed, concepts=list(concepts),
-                               num_workers=train_cfg.num_workers)
-    train_loader, test_loader = loaders
+                               num_workers=train_cfg.num_workers, val_size=val_size)
+    if len(loaders) == 3:
+        train_loader, val_loader, test_loader = loaders
+    else:
+        train_loader, test_loader = loaders
+        val_loader = test_loader
+        val_size = 0.0
+        print("WARNING: no validation split -- best.pt is selected on the TEST split")
 
     net = build_model(name, backbone_cfg, bottleneck_cfg).to(device)
     gen = Generator(name, net, space, backbone_cfg, bottleneck_cfg, train_cfg, device,
-                    data_cfg={"n_samples": n_samples, "seed": train_cfg.seed})
+                    data_cfg={"n_samples": n_samples, "seed": train_cfg.seed, "val_size": val_size})
     opt = torch.optim.Adam(net.parameters(), lr=train_cfg.lr)
     if ckpt is not None:
         net.load_state_dict(ckpt["model_state_dict"])
@@ -460,6 +491,15 @@ def train(
         row = {"epoch": epoch, "recon": sums[0] / n, "kl": sums[1] / n,
                "concept_loss": sums[2] / n, "cycle_loss": sums[3] / n}
         row.update(evaluate(gen, test_loader))
+        val = evaluate(gen, val_loader, max_batches=None)
+        row.update({"val_" + k[len("test_"):]: v for k, v in val.items()})
+        score = val["test_recon"] + (train_cfg.concept_weight * val["test_concept_mse"]
+                                     if "test_concept_mse" in val else 0.0)
+        row["val_score"] = score
+        is_best = score < best_score
+        if is_best:
+            best_score, best_epoch = score, epoch
+        row["best_epoch"] = best_epoch
         history.append(row)
         print("  " + "  ".join(f"{k}={v:.4f}" if isinstance(v, float) else f"{k}={v}"
                                 for k, v in row.items()))
@@ -467,9 +507,14 @@ def train(
         recon_fix = gen.reconstruct(fixed_x)
         prior = gen.generate(8, seed=epoch)
         _save_grid([fixed_x.float().div(255), recon_fix, prior], str(out / "samples" / f"epoch_{epoch:03d}.png"))
-        save(gen, out, history, optimizer=opt, epoch=epoch, quiet=True)   # survives a killed job
+        best = dict(best_score=best_score, best_epoch=best_epoch)
+        if is_best:
+            save(gen, out, history, epoch=epoch, quiet=True, filename="best.pt", extra=best)
+        save(gen, out, history, optimizer=opt, epoch=epoch, quiet=True, extra=best)  # survives a killed job
 
-    save(gen, out, history, optimizer=opt, epoch=train_cfg.epochs)
+    save(gen, out, history, optimizer=opt, epoch=train_cfg.epochs,
+         extra=dict(best_score=best_score, best_epoch=best_epoch))
+    print(f"best epoch {best_epoch} (val score {best_score:.1f}) -> {out / 'best.pt'}")
     return gen
 
 
@@ -477,7 +522,8 @@ def train(
 # Save / load
 # ---------------------------------------------------------------------------
 
-def save(gen: Generator, out_dir, history=None, optimizer=None, epoch=None, quiet=False):
+def save(gen: Generator, out_dir, history=None, optimizer=None, epoch=None, quiet=False,
+         filename: str = "model.pt", extra: Optional[dict] = None):
     """
     Write model.pt (+ readable JSON configs and metrics.csv) to out_dir.
     The curves are also copied to outputs/logs/<run>.csv, which git tracks,
@@ -486,7 +532,7 @@ def save(gen: Generator, out_dir, history=None, optimizer=None, epoch=None, quie
     import json
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
-    tmp = out / "model.pt.tmp"            # write-then-rename: never a half-written model.pt
+    tmp = out / (filename + ".tmp")       # write-then-rename: never a half-written checkpoint
     torch.save({
         "epoch":            epoch,
         "history":          history or [],
@@ -498,8 +544,9 @@ def save(gen: Generator, out_dir, history=None, optimizer=None, epoch=None, quie
         "train_cfg":        gen.train_cfg.to_dict(),
         "concept_space":    gen.space.to_dict() if gen.space else None,
         "data_cfg":         gen.data_cfg,
+        **(extra or {}),
     }, tmp)
-    os.replace(tmp, out / "model.pt")
+    os.replace(tmp, out / filename)
     for fname, cfg in [("backbone_config.json", gen.backbone_cfg),
                        ("bottleneck_config.json", gen.bottleneck_cfg),
                        ("train_config.json", gen.train_cfg)]:
@@ -510,15 +557,22 @@ def save(gen: Generator, out_dir, history=None, optimizer=None, epoch=None, quie
         logs.mkdir(parents=True, exist_ok=True)
         for path in (out / "metrics.csv", logs / f"{out.name}.csv"):
             with open(path, "w", newline="") as f:
-                w = csv.DictWriter(f, fieldnames=list(history[0]))
+                keys = list(dict.fromkeys(k for r in history for k in r))   # old rows may lack val_*
+                w = csv.DictWriter(f, fieldnames=keys, restval="")
                 w.writeheader(); w.writerows(history)
     if not quiet:
         print(f"Saved {gen.name} -> {out}")
 
 
-def load(checkpoint_dir, device: Optional[str] = None) -> Generator:
+def load(checkpoint_dir, device: Optional[str] = None, which: str = "last") -> Generator:
+    """which="last" -> model.pt (final epoch), which="best" -> best.pt (best validation epoch)."""
     device = get_device(device)
-    ckpt = torch.load(Path(checkpoint_dir) / "model.pt", map_location=device, weights_only=False)
+    fname = {"last": "model.pt", "best": "best.pt"}[which]
+    path = Path(checkpoint_dir) / fname
+    if not path.exists():
+        raise FileNotFoundError(f"{path} not found" + (" (runs trained before the best/last change only have model.pt)"
+                                                        if which == "best" else ""))
+    ckpt = torch.load(path, map_location=device, weights_only=False)
     name = ckpt["model_name"]
     _, bcls, _ = MODELS[name]
     backbone_cfg   = ConvVAEConfig(**ckpt["backbone_cfg"])
@@ -552,6 +606,10 @@ def main():
     ap.add_argument("--concept-weight", type=float, default=None)
     ap.add_argument("--intervention-prob", type=float, default=None)
     ap.add_argument("--cycle-weight", type=float, default=None)
+    ap.add_argument("--no-concept-on-mu", action="store_true",
+                    help="old behaviour: concept loss only on the sampled z")
+    ap.add_argument("--val-size", type=float, default=0.05,
+                    help="fraction of images held out to pick best.pt (default 0.05)")
     ap.add_argument("--lr", type=float, default=None)
     ap.add_argument("--batch-size", type=int, default=None)
     ap.add_argument("--seed", type=int, default=None)
@@ -586,14 +644,15 @@ def main():
 
     train(a.model, epochs=a.epochs, concepts=a.concepts, n_bins=a.n_bins,
           n_samples=a.n_samples or None, tag=a.tag, out_dir=a.out_dir, device=a.device,
-          resume=a.resume,
+          resume=a.resume, val_size=a.val_size,
           backbone_overrides=pick(latent_dim=a.latent_dim, enc_channels=a.enc_channels,
                                   dec_channels=dec, kl_weight=a.kl_weight),
           bottleneck_overrides=pick(embedding_dim=a.embedding_dim, hidden_dim=a.hidden_dim,
                                     depth=a.depth, dropout=a.dropout),
           **pick(concept_weight=a.concept_weight, intervention_prob=a.intervention_prob,
                  lr=a.lr, cycle_weight=a.cycle_weight, batch_size=a.batch_size,
-                 seed=a.seed, num_workers=a.num_workers))
+                 seed=a.seed, num_workers=a.num_workers,
+                 concept_on_mu=False if a.no_concept_on_mu else None))
 
 
 if __name__ == "__main__":

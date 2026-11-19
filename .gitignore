@@ -19,6 +19,14 @@ outputs/*
 outputs/results/*
 !outputs/results/*.csv
 !outputs/results/*.tex
+# benchmark tables live one level down (and per-dataset two levels down);
+# each directory level must be re-opened explicitly, then only CSVs let in.
+!outputs/results/benchmark/
+outputs/results/benchmark/*
+!outputs/results/benchmark/*.csv
+!outputs/results/benchmark/*/
+outputs/results/benchmark/*/*
+!outputs/results/benchmark/*/*.csv
 !outputs/logs/
 outputs/logs/*
 !outputs/logs/*.csv

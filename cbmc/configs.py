@@ -146,6 +146,11 @@ class TrainConfig(BaseConfig):
     # Trains the decoder to actually change its output when concepts change.
     # Encoder grads are zeroed after this backward so only decoder+CEM update.
     cycle_weight:      float = 0.0
+    # Also supervise the concepts predicted from the posterior MEAN mu (the input
+    # used at test time / for reconstruction), not only from the sampled z.
+    # Without it a bottleneck can learn to rely on the N(0,1) noise in unused
+    # latent dims and break when that noise is absent (z = mu).
+    concept_on_mu:     bool  = False
 
 
 @dataclass

@@ -225,17 +225,30 @@ def get_shapes3d(
     concepts: Sequence[str] = FACTOR_NAMES,
     h5_path: str | Path = DEFAULT_H5,
     num_workers: int = 0,
-) -> Tuple[DataLoader, DataLoader]:
-    """Train / test DataLoaders yielding (uint8 image, raw concepts, shape idx)."""
+    val_size: float = 0.0,
+):
+    """
+    Train / test DataLoaders yielding (uint8 image, raw concepts, shape idx).
+
+    With val_size > 0 a validation split (that fraction of ALL images) is cut
+    from the training part and (train, val, test) is returned. The test split
+    is identical either way, so held_out_indices() still matches it.
+    """
     images, c, y = load_shapes3d_arrays(h5_path, n_samples, seed, concepts)
     perm = torch.randperm(len(images), generator=torch.Generator().manual_seed(seed))
     n_test = int(len(images) * test_size)
-    te, tr = perm[:n_test], perm[n_test:]
-    train = TensorDataset(images[tr], c[tr], y[tr])
-    test  = TensorDataset(images[te], c[te], y[te])
-    print(f"Shapes3D: {len(train)} train / {len(test)} test, concepts={list(concepts)}")
-    return (DataLoader(train, batch_size=batch_size, shuffle=True, num_workers=num_workers, drop_last=True),
-            DataLoader(test,  batch_size=batch_size, shuffle=False, num_workers=num_workers))
+    n_val = int(len(images) * val_size)
+    te, va, tr = perm[:n_test], perm[n_test:n_test + n_val], perm[n_test + n_val:]
+    mk = lambda i: TensorDataset(images[i], c[i], y[i])
+    train, test = mk(tr), mk(te)
+    train_dl = DataLoader(train, batch_size=batch_size, shuffle=True, num_workers=num_workers, drop_last=True)
+    test_dl = DataLoader(test, batch_size=batch_size, shuffle=False, num_workers=num_workers)
+    if n_val == 0:
+        print(f"Shapes3D: {len(train)} train / {len(test)} test, concepts={list(concepts)}")
+        return train_dl, test_dl
+    val = mk(va)
+    print(f"Shapes3D: {len(train)} train / {len(val)} val / {len(test)} test, concepts={list(concepts)}")
+    return train_dl, DataLoader(val, batch_size=batch_size, shuffle=False, num_workers=num_workers), test_dl
 
 
 def held_out_indices(n_samples: Optional[int] = 100_000, seed: int = 42,

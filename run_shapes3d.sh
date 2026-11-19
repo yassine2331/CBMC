@@ -48,10 +48,10 @@
 #
 #  OPTIONS
 #  -------
-#    --epochs N              epochs per variant                 default 30
-#    --n-samples N           random subset of the 480k images   default 200000
+#    --epochs N              epochs per variant                 default 50
+#    --n-samples N           random subset of the 480k images   default 300000
 #                            (0 = all; ~6 GB RAM, ~2.4x slower than 200k)
-#    --n-bins N              bins per concept for `binned`      default 5
+#    --n-bins N              bins per concept for `binned`      default 10
 #    --concepts "A B ..."    subset of the 6 factors            default all 6
 #                            e.g. --concepts "floor_hue wall_hue object_hue scale orientation"
 #    --batch-size N                                             default 256
@@ -64,7 +64,7 @@
 #                            back. This is what makes interventions change the
 #                            image; at 0 the decoder learns to ignore the
 #                            gate.                              default 100
-#    --latent-dim N          z size                             default 32
+#    --latent-dim N          z size                             default 16
 #    --enc-channels "A B C D"   encoder widths (decoder mirrors) default "32 64 128 256"
 #    --kl-weight B           beta                               default 1.0
 #    --embedding-dim N       anchor vector size (cem/categorical) default 16
@@ -72,6 +72,10 @@
 #    --depth N               anchor MLP depth                   default 2
 #    --seed N                                                   default 42
 #    --suffix NAME           saves to shapes3d_<variant>_NAME
+#    --no-concept-on-mu      old behaviour: concept loss only on the sampled z
+#                            (default: also on the posterior mean mu, the input
+#                            used for reconstruction and the test metrics)
+#    --val-size F            fraction of images held out to pick best.pt  default 0.05
 #    --no-resume             retrain from scratch even if a checkpoint exists
 #    --parallel              submit one sbatch job per variant and exit
 #    --download              fetch 3dshapes.h5 and exit (run on the login node)
@@ -87,15 +91,18 @@
 #
 #  COST (rough, from a local run: ~0.55 ms per image per epoch for cem)
 #  ----
-#  defaults (200k x 30 epochs): vae/cbm ~0.5-1 h, cem/cem_linear ~1 h,
-#  binned ~2 h, categorical ~3 h (57 anchor MLPs). Sequential total ~8 h;
-#  with --parallel the wall time is the slowest variant.
+#  defaults (300k x 50 epochs): vae/cbm ~1.5-2 h, cem/cem_linear ~2-2.5 h,
+#  binned ~4 h, categorical ~6 h. With --parallel the wall time is the
+#  slowest variant; all fit in the 24 h limit.
 #
 #
 #  OUTPUT, and getting it back to the laptop
 #  -----------------------------------------
 #    outputs/models/shapes3d_<variant>[_suffix]/
-#        model.pt  *_config.json  metrics.csv  samples/epoch_XXX.png
+#        model.pt     last epoch (also what --resume continues from)
+#        best.pt      epoch with the lowest validation score
+#                     (val recon + concept_weight x val concept MSE)
+#        *_config.json  metrics.csv  samples/epoch_XXX.png
 #    outputs/logs/shapes3d_<variant>[_suffix].csv   (tracked by git)
 #
 #  The weights are gitignored (a few MB each). Pull them with:
@@ -126,7 +133,7 @@ H5_URL="https://storage.googleapis.com/3d-shapes/3dshapes.h5"
 
 usage () { sed -n '2,/^# ====.*$/p' "$0" | sed 's/^# \{0,1\}//'; }
 
-EPOCHS="${EPOCHS:-60}"
+EPOCHS="${EPOCHS:-50}"
 N_SAMPLES="${N_SAMPLES:-300000}"
 N_BINS="${N_BINS:-10}"
 CONCEPTS="${CONCEPTS:-}"
@@ -146,6 +153,8 @@ SUFFIX="${SUFFIX:-}"
 DEVICE="${DEVICE:-}"
 ONLY="${ONLY:-}"
 RESUME=1
+NO_MU=""
+VAL_SIZE="${VAL_SIZE:-}"
 PARALLEL=""
 DOWNLOAD=""
 
@@ -157,6 +166,8 @@ while [ $# -gt 0 ]; do
         --parallel)            PARALLEL=1; shift; continue ;;
         --download)            DOWNLOAD=1; shift; continue ;;
         --no-resume)           RESUME=""; FORWARD+=("$1"); shift; continue ;;
+        --no-concept-on-mu)    NO_MU=1; FORWARD+=("$1"); shift; continue ;;
+        --val-size)            VAL_SIZE="$2" ;;
         --epochs)              EPOCHS="$2" ;;
         --n-samples)           N_SAMPLES="$2" ;;
         --n-bins)              N_BINS="$2" ;;
@@ -257,6 +268,8 @@ COMMON="--epochs $EPOCHS --n-samples $N_SAMPLES --n-bins $N_BINS"
 [ -n "$SEED" ]              && COMMON="$COMMON --seed $SEED"
 [ -n "$DEVICE" ]            && COMMON="$COMMON --device $DEVICE"
 [ -n "$SUFFIX" ]            && COMMON="$COMMON --tag $SUFFIX"
+[ -n "$NO_MU" ]             && COMMON="$COMMON --no-concept-on-mu"
+[ -n "$VAL_SIZE" ]          && COMMON="$COMMON --val-size $VAL_SIZE"
 [ -n "$RESUME" ]            && COMMON="$COMMON --resume"
 
 # tqdm redraws fill the .err log; refresh at most every 60 s
