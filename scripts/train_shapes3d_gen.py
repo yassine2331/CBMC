@@ -360,7 +360,7 @@ def train(
     epochs: Optional[int] = None,
     concepts=FACTOR_NAMES,
     n_bins: int = 5,
-    n_samples: Optional[int] = 100_000,
+    n_samples: Optional[int] = None,       # None = all 480k images
     tag: Optional[str] = None,
     out_dir: Optional[str] = None,
     device: Optional[str] = None,
@@ -600,7 +600,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--model", default="cem", choices=MODEL_CHOICES)
     ap.add_argument("--epochs", type=int, default=None)
-    ap.add_argument("--n-samples", type=int, default=100_000, help="subset size; 0 = all 480k")
+    ap.add_argument("--n-samples", type=int, default=0, help="subset size; 0 (default) = all 480k")
     ap.add_argument("--n-bins", type=int, default=5, help="binned (case3) only")
     ap.add_argument("--concepts", nargs="+", default=FACTOR_NAMES, choices=FACTOR_NAMES)
     ap.add_argument("--concept-weight", type=float, default=None)

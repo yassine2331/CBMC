@@ -1,0 +1,86 @@
+% =====================================================================
+%  Draft Results text (framing). Numbers from appendix_results.tex.
+%  CBM sentences assume the rerun with per-concept MLPs keeps the same
+%  ordering -- check before submission.
+% =====================================================================
+
+\subsection{Summary of findings}
+
+We evaluate three claims: (i) a multiplicative gate $c_i\,\varphi_i(z)$ fails
+when a concept is $0$, whereas anchor interpolation does not; (ii) on continuous
+concepts, interpolation is more accurate and far cheaper than discretising the
+concept into bins; and (iii) on real data, these benefits come at no cost in
+predictive performance.
+
+\paragraph{The zero failure of multiplicative embeddings.}
+The zero test isolates the samples in which a concept equals $0$
+(Tables~\ref{tab:app-mnist-zero} and~\ref{tab:app-pendulum-zero}). Because
+groups can differ in difficulty, we compare each model's error on the zero
+group with its own error on the non-zero group. For CEM (ours) and every binned
+model the zero group is \emph{not} harder under full intervention
+(ArithmeticMNIST: $3.38$ vs.\ $5.53$; Pendulum: $0.018$ vs.\ $0.023$). For the
+multiplicative variants it is: on ArithmeticMNIST the intervened error rises from
+$16.8$ to $23.5$ ($+39\%$) for CEM-Linear and from $20.9$ to $32.8$ ($+57\%$)
+for CEM-Linear (no LN), and on Pendulum from $0.139$ to $0.245$ ($+77\%$) for
+CEM-Linear (no LN). Correcting \emph{only} the zero-valued concept shows the same
+pattern: it reduces the error of CEM (ours) from $17.9$ to $11.9$, but barely
+helps CEM-Linear ($25.7 \to 20.7$) and \emph{increases} the error of
+CEM-Linear (no LN) ($37.8 \to 47.3$): telling these models the correct value $0$
+erases the information carried by that concept's embedding.
+
+The generative setting makes the mechanism visible
+(Table~\ref{tab:app-zero-gen}). Object shape is not a concept, so it reaches the
+decoder only through the concept embeddings. When the concepts of real images
+are set to $0$, CEM keeps the shape of every object ($\geq 0.99$ shape accuracy
+for any number of zeroed concepts), whereas CEM-Linear loses it progressively
+($0.97$, $0.89$, $0.70$ for 2, 3, 4 zeroed concepts) and, with all five at $0$,
+maps every input to the same image (shape accuracy $0.25$, i.e.\ chance).
+A single zeroed concept is compensated by the remaining blocks in both settings
+(Table~\ref{tab:app-orient}); the failure grows with the share of the
+bottleneck that is zero. This explains why it is pronounced with two concepts
+(ArithmeticMNIST, Pendulum) and not visible on LIDC-IDRI, where nine concepts
+are rarely zero together.
+
+\paragraph{Interpolation versus discretisation.}
+Binning removes the zero problem as well, since no embedding is multiplied by
+the concept value. Its cost is resolution and size. The number of parameters
+of a binned bottleneck grows linearly with the number of bins $k$, since every
+bin of every concept has its own embedding, whereas ours uses two anchors per
+concept regardless of the resolution required (Table~\ref{tab:app-params}):
+$1.5\times$, $2.5\times$ and $3.4\times$ the parameters of our model for
+$k = 5, 10, 15$ on ArithmeticMNIST and Pendulum, and $1.7\times$, $2.8\times$
+and $3.9\times$ on LIDC-IDRI. In addition, $k$ is a dataset-dependent hyperparameter, and a
+binned model can only represent, predict or receive as an intervention the
+$k$ bin centres.
+
+These costs pay off only when the concepts are themselves discrete. The
+ArithmeticMNIST concepts are digits, i.e.\ nine categories, and with $k \geq 10$
+bins every digit gets its own embedding; here binning is the correct inductive
+bias and the binned models are the most accurate (task MSE $13.9$ vs.\ $22.5$
+for $k = 15$), while $k = 5$, which merges digits, is not significantly better
+than ours on task error. On Pendulum, whose concepts are genuinely continuous
+angles, our model is the most accurate on every metric: binned models have
+$1.5$--$1.8\times$ its task error and about $2\times$ its intervention error,
+and their concept error is bounded below by the bin width ($0.020$--$0.030$
+vs.\ $0.011$), whatever the number of bins we tried. On LIDC-IDRI, binning is
+worse than every continuous CEM under intervention, and increasingly so with
+more bins: balanced accuracy $0.857$, $0.846$ and $0.830$ for $k = 5, 10, 15$,
+against $0.868$ for ours (all $p < 0.05$), with $1.7\times$, $2.8\times$ and
+$3.9\times$ the parameters, and a higher concept error ($0.132$--$0.146$ vs.\
+$0.110$). Without intervention all models are tied. The Shapes3D results agree: the binned model reaches $0.933$
+concept accuracy, against $0.9997$ for ours, on concepts whose true values lie
+on a fixed grid.
+
+\paragraph{Real data.}
+On LIDC-IDRI the radiologists' concepts are subjective, noisy and do not
+determine malignancy, and here the continuous CEM variants are statistically
+indistinguishable under intervention (balanced accuracy $0.868$, $0.869$,
+$0.872$ for CEM, CEM-Linear and CEM-Linear (no LN); differences to ours
+$p \ge 0.14$). All three improve over CBM ($0.847$) by $2.1$--$2.5$ points
+(ours vs.\ CBM: $p < 10^{-4}$). \todo{Check against the CBM
+rerun.} Without intervention, ours is $1.2$ points below CEM-Linear (no LN)
+($0.831$ vs.\ $0.843$, $p = 0.006$) and tied with CEM-Linear. The zero failure
+does not appear on this dataset (Table~\ref{tab:app-lidc-zero}). We read this as
+evidence that the representation we propose does not cost performance on real
+data, while it removes a failure mode that the multiplicative variants exhibit
+whenever zero-valued concepts carry a large share of the bottleneck.

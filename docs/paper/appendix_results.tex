@@ -1,0 +1,358 @@
+% =====================================================================
+%  Appendix: full results.  Generated from outputs/results/benchmark/*
+%  (prediction, 30 seeds) and outputs/models/shapes3d_* (generation).
+%  Paste after \appendix.  Needs booktabs and the \todo macro of main.tex.
+% =====================================================================
+
+\section{Full experimental results}
+\label{app:results}
+
+\subsection{Protocol}
+\label{app:protocol}
+
+\paragraph{Models.} Every model uses the same encoder, the same concept
+networks (an MLP of width $64$ and depth $2$ per concept) and the same head
+architecture; only the bottleneck differs.
+\textbf{CBM}: the head sees the $C$ scalar concepts.
+\textbf{CEM (ours)}: each concept has two input-dependent anchors
+$e_i^{+}(z), e_i^{-}(z) \in \mathbb{R}^{16}$, mixed as
+$w_i e_i^{+} + (1 - w_i) e_i^{-}$ with $w_i = \operatorname{clamp}(c_i/2 + 1/2, 0, 1)$.
+\textbf{CEM-Linear}: one embedding per concept scaled by the concept,
+$c_i\,\varphi_i(z)$, followed by LayerNorm.
+\textbf{CEM-Linear (no LN)}: the same without LayerNorm.
+\textbf{CEM-Linear (raw units)}: as CEM-Linear, but the concepts are kept in
+their original units (digits 569Xl-$, angles, LIDC-IDRI ratings, mm, mm$):
+the model predicts the raw values, gates its embeddings with them and receives
+raw values under intervention. \todo{Not run yet.}
+\textbf{Binned, $k$}: each concept is discretised into $k$ equal-width bins and
+handled as a categorical CEM with one embedding per bin.
+Concepts are normalised to $[-1, 1]$ with the training-set minimum and maximum.
+
+\paragraph{Training.} The loss is the task loss plus $\lambda = 1$ times the
+concept loss (MSE for continuous models, cross-entropy for binned models).
+With probability $0.25$ per batch the true concepts are fed to the head
+(intervention training). ArithmeticMNIST: 30 epochs, batch $128$, Adam, learning rate $10^{-3}$.
+Pendulum: 20 epochs, batch $64$, Adam, learning rate $10^{-3}$.
+LIDC-IDRI: 250 epochs, batch $16$, AdamW (weight decay $0.01$, learning rate
+$10^{-3}$), encoder dropout $0.1$, class-weighted cross-entropy.
+Each model is trained with 30 seeds (41--70).
+
+\paragraph{Metrics.}
+\emph{Task}: prediction error without intervention.
+\emph{Interv.}: all predicted concepts replaced by the ground truth.
+\emph{Concept MSE}: error of the predicted concepts in normalised units (for
+binned models, of the predicted bin centre).
+\emph{Zero test}: a test sample belongs to the zero group if at least one of
+its concepts satisfies $|c_i| \le 0.025$ in normalised units. On this group we
+report the task error without intervention, after fixing \emph{only} the
+zero-valued concept(s) to the truth, and after fixing all concepts; the last
+column repeats full intervention on the complementary (non-zero) group.
+
+\paragraph{Statistics.} We report mean $\pm$ standard deviation over seeds and
+compare every model with CEM (ours) by a two-sided Wilcoxon signed-rank test
+paired by seed (on LIDC-IDRI, the same patient split is used for every model
+within a seed).
+
+\subsection{Caveats on the current numbers}
+\label{app:caveats}
+\begin{itemize}
+  \item \textbf{CBM} rows (\ddag) come from the original CBM whose concept
+        read-out was a single linear layer. It has since been replaced by one
+        MLP per concept, matching the other models' concept networks; the
+        rerun is pending. \todo{Replace the CBM rows.}
+  \item \textbf{Shapes3D} (Section~\ref{app:shapes3d}) uses a single seed. The
+        counterfactual fine-tuning results are a short local fine-tune of two
+        models, not a full retraining of all models.
+\end{itemize}
+
+\subsection{ArithmeticMNIST}
+\label{app:mnist}
+
+\begin{table}[h]
+\centering\small
+\caption{ArithmeticMNIST, 30 seeds, 30 epochs. Task: the result of $a \circ b$ with $\circ \in \{+,\times\}$ (regression, raw units). ``Interv.'' replaces both predicted digits with the ground truth. Concept accuracy (correct bin) only exists for binned models; it is bin accuracy, not digit accuracy (with $k{=}5$, digits 1--2, 3--4, 6--7 and 8--9 share a bin). Concept MSE is measured at the bin centre, so even perfect bins have a quantisation floor ($0.0167$, $0.0044$ and $0.0019$ for $k = 5, 10, 15$). Mean $\pm$ standard deviation over seeds. Bold: best mean among models with all 30 seeds. $^{\circ}$: \emph{not} significantly different from CEM (ours) (two-sided Wilcoxon signed-rank test paired by seed, $p \ge 0.05$); every unmarked difference is significant. \ddag: original CBM with a linear concept read-out (see Section~\ref{app:caveats}).}
+\label{tab:app-mnist}
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Model} & \textbf{Task MSE} & \textbf{Interv.\ MSE} & \textbf{Concept MSE} & \textbf{Concept acc.} \\
+\midrule
+CBM\,\textsuperscript{\ddag} & $58.63 \pm 19.44$ & $147.17 \pm 3.87$ & $0.1713 \pm 0.0234$ & --- \\
+CEM (ours) & $22.54 \pm 2.56$ & $5.10 \pm 1.29$ & $0.0513 \pm 0.0053$ & --- \\
+CEM-Linear & $30.06 \pm 5.21$ & $18.16 \pm 4.57$ & $0.0715 \pm 0.0219$ & --- \\
+CEM-Linear (no LN) & $44.57 \pm 12.01$ & $23.28 \pm 7.67$ & $0.1284 \pm 0.0622$ & --- \\
+Binned, $k{=}5$ & $21.01 \pm 4.23^{\circ}$ & $4.17 \pm 1.22$ & $0.0593 \pm 0.0099$ & $0.928 \pm 0.016$ \\
+Binned, $k{=}10$ & $14.89 \pm 3.00$ & $2.50 \pm 0.56$ & $0.0366 \pm 0.0062$ & $0.942 \pm 0.012$ \\
+Binned, $k{=}15$ & $\mathbf{13.91 \pm 3.19}$ & $\mathbf{1.47 \pm 0.58}$ & $\mathbf{0.0348 \pm 0.0062}$ & $\mathbf{0.946 \pm 0.010}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[h]
+\centering\small
+\caption{ArithmeticMNIST zero test. The zero group is the 404 of 2000 test samples where at least one digit is a 5, which is exactly $0$ after normalisation. ``Fix zero concept'' sets only the zero-valued concept(s) to the truth and keeps the other prediction. Task MSE, lower is better. Mean $\pm$ standard deviation over seeds. Bold: best mean among models with all 30 seeds. $^{\circ}$: \emph{not} significantly different from CEM (ours) (two-sided Wilcoxon signed-rank test paired by seed, $p \ge 0.05$); every unmarked difference is significant. \ddag: original CBM with a linear concept read-out (see Section~\ref{app:caveats}).}
+\label{tab:app-mnist-zero}
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Model} & \textbf{Zero: no interv.} & \textbf{Zero: fix zero concept} & \textbf{Zero: fix all} & \textbf{Non-zero: fix all} \\
+\midrule
+CBM\,\textsuperscript{\ddag} & $42.35 \pm 16.59$ & $75.59 \pm 11.63$ & $99.85 \pm 3.33$ & $159.15 \pm 4.35$ \\
+CEM (ours) & $17.90 \pm 2.71$ & $11.88 \pm 1.90$ & $3.38 \pm 1.11$ & $5.53 \pm 1.37$ \\
+CEM-Linear & $25.67 \pm 6.71$ & $20.70 \pm 4.70$ & $23.46 \pm 4.25$ & $16.82 \pm 4.71$ \\
+CEM-Linear (no LN) & $37.75 \pm 9.17$ & $47.27 \pm 15.61$ & $32.83 \pm 6.29$ & $20.86 \pm 8.13$ \\
+Binned, $k{=}5$ & $14.68 \pm 4.09$ & $10.83 \pm 2.82^{\circ}$ & $3.57 \pm 1.17^{\circ}$ & $4.32 \pm 1.31$ \\
+Binned, $k{=}10$ & $12.84 \pm 3.99$ & $7.52 \pm 2.68$ & $2.19 \pm 0.96$ & $2.58 \pm 0.56$ \\
+Binned, $k{=}15$ & $\mathbf{11.37 \pm 3.06}$ & $\mathbf{7.02 \pm 2.10}$ & $\mathbf{1.41 \pm 0.54}$ & $\mathbf{1.49 \pm 0.63}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Pendulum}
+\label{app:pendulum}
+
+\begin{table}[h]
+\centering\small
+\caption{Pendulum, 30 seeds, 20 epochs. Concepts: pendulum angle $\theta$ and light angle $\varphi$; task: shadow position and length (2 outputs, raw units), a deterministic function of the concepts. Mean $\pm$ standard deviation over seeds. Bold: best mean among models with all 30 seeds. $^{\circ}$: \emph{not} significantly different from CEM (ours) (two-sided Wilcoxon signed-rank test paired by seed, $p \ge 0.05$); every unmarked difference is significant. \ddag: original CBM with a linear concept read-out (see Section~\ref{app:caveats}).}
+\label{tab:app-pendulum}
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Model} & \textbf{Task MSE} & \textbf{Interv.\ MSE} & \textbf{Concept MSE} & \textbf{Concept acc.} \\
+\midrule
+CBM\,\textsuperscript{\ddag} & $0.4016 \pm 0.2062$ & $0.5903 \pm 0.2881$ & $0.0993 \pm 0.0459$ & --- \\
+CEM (ours) & $\mathbf{0.0274 \pm 0.0084}$ & $\mathbf{0.0230 \pm 0.0074}$ & $\mathbf{0.0109 \pm 0.0004}$ & --- \\
+CEM-Linear & $0.0497 \pm 0.0124$ & $0.0475 \pm 0.0115$ & $0.0118 \pm 0.0006$ & --- \\
+CEM-Linear (no LN) & $0.1854 \pm 0.0714$ & $0.1439 \pm 0.0457$ & $0.0126 \pm 0.0007$ & --- \\
+Binned, $k{=}5$ & $0.0443 \pm 0.0222$ & $0.0448 \pm 0.0200$ & $0.0297 \pm 0.0004$ & $\mathbf{0.987 \pm 0.002}$ \\
+Binned, $k{=}10$ & $0.0422 \pm 0.0131$ & $0.0442 \pm 0.0133$ & $0.0214 \pm 0.0000$ & $0.976 \pm 0.004$ \\
+Binned, $k{=}15$ & $0.0480 \pm 0.0172$ & $0.0497 \pm 0.0166$ & $0.0202 \pm 0.0001$ & $0.978 \pm 0.005$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[h]
+\centering\small
+\caption{Pendulum zero test. Zero group: the 988 of 20000 test samples with a concept within $0.025$ of $0$ (normalised units). Columns as in Table~\ref{tab:app-mnist-zero}. Mean $\pm$ standard deviation over seeds. Bold: best mean among models with all 30 seeds. $^{\circ}$: \emph{not} significantly different from CEM (ours) (two-sided Wilcoxon signed-rank test paired by seed, $p \ge 0.05$); every unmarked difference is significant. \ddag: original CBM with a linear concept read-out (see Section~\ref{app:caveats}).}
+\label{tab:app-pendulum-zero}
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Model} & \textbf{Zero: no interv.} & \textbf{Zero: fix zero concept} & \textbf{Zero: fix all} & \textbf{Non-zero: fix all} \\
+\midrule
+CBM\,\textsuperscript{\ddag} & $0.4697 \pm 0.2454$ & $2.8030 \pm 1.4446$ & $1.2106 \pm 0.7312$ & $0.5580 \pm 0.2676$ \\
+CEM (ours) & $\mathbf{0.0233 \pm 0.0092}$ & $\mathbf{0.0192 \pm 0.0079}$ & $\mathbf{0.0182 \pm 0.0075}$ & $\mathbf{0.0232 \pm 0.0075}$ \\
+CEM-Linear & $0.0495 \pm 0.0145$ & $0.0516 \pm 0.0158$ & $0.0539 \pm 0.0171$ & $0.0472 \pm 0.0117$ \\
+CEM-Linear (no LN) & $0.1359 \pm 0.0503$ & $0.1984 \pm 0.0352$ & $0.2452 \pm 0.0395$ & $0.1386 \pm 0.0467$ \\
+Binned, $k{=}5$ & $0.0312 \pm 0.0186^{\circ}$ & $0.0307 \pm 0.0181$ & $0.0310 \pm 0.0180$ & $0.0456 \pm 0.0202$ \\
+Binned, $k{=}10$ & $0.0420 \pm 0.0150$ & $0.0426 \pm 0.0152$ & $0.0432 \pm 0.0153$ & $0.0442 \pm 0.0133$ \\
+Binned, $k{=}15$ & $0.0413 \pm 0.0294$ & $0.0411 \pm 0.0291$ & $0.0414 \pm 0.0286$ & $0.0502 \pm 0.0163$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{LIDC-IDRI}
+\label{app:lidc}
+
+\begin{table}[h]
+\centering\small
+\caption{LIDC-IDRI malignancy (binary), 9 concepts (six radiologist ratings on a 1--5 scale and three size measurements: diameter, volume, surface area), 30 seeds, 250 epochs; train/test split by patient, redrawn per seed (same split for every model within a seed). Higher is better except concept MSE. Mean $\pm$ standard deviation over seeds. Bold: best mean among models with all 30 seeds. $^{\circ}$: \emph{not} significantly different from CEM (ours) (two-sided Wilcoxon signed-rank test paired by seed, $p \ge 0.05$); every unmarked difference is significant. \ddag: original CBM with a linear concept read-out (see Section~\ref{app:caveats}). \todo{Binned $k{=}5$ and $k{=}10$ are still running.}}
+\label{tab:app-lidc}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lccccc}
+\toprule
+\textbf{Model} & \textbf{Task bal.\ acc.} & \textbf{Task acc.} & \textbf{Interv.\ bal.\ acc.} & \textbf{Interv.\ acc.} & \textbf{Concept MSE} \\
+\midrule
+CBM\,\textsuperscript{\ddag} & $0.839 \pm 0.026^{\circ}$ & $0.844 \pm 0.027^{\circ}$ & $0.847 \pm 0.018$ & $0.850 \pm 0.019$ & $0.1093 \pm 0.0073^{\circ}$ \\
+CEM (ours) & $0.831 \pm 0.027$ & $0.835 \pm 0.031$ & $0.868 \pm 0.016$ & $0.871 \pm 0.017$ & $0.1096 \pm 0.0069$ \\
+CEM-Linear & $0.838 \pm 0.026^{\circ}$ & $0.841 \pm 0.029^{\circ}$ & $0.869 \pm 0.022^{\circ}$ & $0.872 \pm 0.024^{\circ}$ & $\mathbf{0.1089 \pm 0.0076}^{\circ}$ \\
+CEM-Linear (no LN) & $\mathbf{0.843 \pm 0.022}$ & $\mathbf{0.848 \pm 0.024}$ & $\mathbf{0.872 \pm 0.019}^{\circ}$ & $\mathbf{0.875 \pm 0.020}^{\circ}$ & $0.1092 \pm 0.0077^{\circ}$ \\
+Binned, $k{=}5$ & $0.839 \pm 0.030^{\circ}$ & $0.841 \pm 0.032^{\circ}$ & $0.857 \pm 0.022$ & $0.858 \pm 0.022$ & $0.1322 \pm 0.0093$ \\
+Binned, $k{=}10$ & $0.837 \pm 0.026^{\circ}$ & $0.842 \pm 0.029^{\circ}$ & $0.846 \pm 0.018$ & $0.847 \pm 0.017$ & $0.1344 \pm 0.0114$ \\
+Binned, $k{=}15$ & $0.835 \pm 0.028^{\circ}$ & $0.834 \pm 0.031^{\circ}$ & $0.830 \pm 0.019$ & $0.830 \pm 0.019$ & $0.1462 \pm 0.0119$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[h]
+\centering\small
+\caption{LIDC-IDRI zero test, balanced accuracy. Zero group: test nodules with a concept within $0.025$ of $0$; 52 of 233 test nodules on average (range 38--69), so these estimates are noisy. Columns as in Table~\ref{tab:app-mnist-zero}. Mean $\pm$ standard deviation over seeds. Bold: best mean among models with all 30 seeds. $^{\circ}$: \emph{not} significantly different from CEM (ours) (two-sided Wilcoxon signed-rank test paired by seed, $p \ge 0.05$); every unmarked difference is significant. \ddag: original CBM with a linear concept read-out (see Section~\ref{app:caveats}).}
+\label{tab:app-lidc-zero}
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Model} & \textbf{Zero: no interv.} & \textbf{Zero: fix zero concept} & \textbf{Zero: fix all} & \textbf{Non-zero: fix all} \\
+\midrule
+CBM\,\textsuperscript{\ddag} & $0.872 \pm 0.033^{\circ}$ & $\mathbf{0.888 \pm 0.041}^{\circ}$ & $0.914 \pm 0.034^{\circ}$ & $0.824 \pm 0.025$ \\
+CEM (ours) & $0.873 \pm 0.053$ & $0.881 \pm 0.049$ & $0.917 \pm 0.034$ & $0.850 \pm 0.017$ \\
+CEM-Linear & $0.873 \pm 0.049^{\circ}$ & $0.885 \pm 0.049^{\circ}$ & $0.925 \pm 0.042^{\circ}$ & $0.849 \pm 0.022^{\circ}$ \\
+CEM-Linear (no LN) & $\mathbf{0.876 \pm 0.050}^{\circ}$ & $0.884 \pm 0.047^{\circ}$ & $\mathbf{0.929 \pm 0.037}$ & $\mathbf{0.851 \pm 0.020}^{\circ}$ \\
+Binned, $k{=}5$ & $0.876 \pm 0.052^{\circ}$ & $0.877 \pm 0.060^{\circ}$ & $0.905 \pm 0.044^{\circ}$ & $0.837 \pm 0.024$ \\
+Binned, $k{=}10$ & $0.874 \pm 0.058^{\circ}$ & $0.886 \pm 0.053^{\circ}$ & $0.907 \pm 0.046^{\circ}$ & $0.824 \pm 0.018$ \\
+Binned, $k{=}15$ & $0.868 \pm 0.054^{\circ}$ & $0.872 \pm 0.055^{\circ}$ & $0.886 \pm 0.047$ & $0.810 \pm 0.022$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[h]
+\centering\small
+\caption{Trainable parameters per model (encoder + bottleneck + head). All models share the encoder, concept-network width ($64$), depth ($2$) and embedding size ($16$ per concept); only the bottleneck differs.}
+\label{tab:app-params}
+\begin{tabular}{lrrr}
+\toprule
+\textbf{Model} & \textbf{ArithmeticMNIST} & \textbf{Pendulum} & \textbf{LIDC-IDRI} \\
+\midrule
+CBM & 94{,}115 & 94{,}724 & 294{,}059 \\
+CEM (ours) & 159{,}267 & 159{,}876 & 591{,}275 \\
+CEM-Linear & 130{,}307 & 130{,}916 & 460{,}955 \\
+CEM-Linear (no LN) & 130{,}243 & 130{,}852 & 460{,}667 \\
+CEM-Linear (raw units) & --- & --- & --- \\
+Binned, $k{=}5$ & 246{,}667 & 247{,}276 & 984{,}575 \\
+Binned, $k{=}10$ & 392{,}117 & 392{,}726 & 1{,}639{,}100 \\
+Binned, $k{=}15$ & 537{,}567 & 538{,}176 & 2{,}293{,}625 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Shapes3D --- generation}
+\label{app:shapes3d}
+
+\paragraph{Setup.} Convolutional VAE (encoder channels $32$--$256$, latent
+dimension $16$, $64 \times 64$ RGB), with the concept bottleneck placed between
+the latent code $z$ and the decoder, so the decoder only sees the concept
+embeddings. Five concepts are supervised: floor hue, wall hue, object hue,
+scale and orientation; object \emph{shape} is deliberately \emph{not} a concept.
+Training: 300k-image random subset, 10\% test, 5\% validation; 50 epochs, batch
+$256$, Adam, learning rate $10^{-3}$, concept weight $100$, intervention
+probability $0.5$, cycle weight $100$. The concept loss is averaged over the
+sampled $z$ and the posterior mean $\mu$, so that concept prediction does not
+depend on the sampling noise. The checkpoint with the best validation score
+(reconstruction $+$ concept weight $\times$ concept MSE) is reported. Single seed.
+Reconstruction is binary cross-entropy summed over the pixels of one image.
+
+\begin{table}[h]
+\centering\small
+\caption{Shapes3D, standard training (single seed, held-out test split).
+Concept accuracy: the predicted value falls in the correct factor level.}
+\label{tab:app-shapes3d}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Model} & \textbf{Recon.\ (BCE)} & \textbf{Concept MSE} & \textbf{Concept acc.} \\
+\midrule
+VAE (no concepts)      & $3460.6$ & ---      & ---      \\
+CBM                    & $3552.2$ & $0.0091$ & $0.962$  \\
+CEM (ours)             & $3458.6$ & $0.0003$ & $\mathbf{0.9997}$ \\
+CEM-Linear             & $3461.2$ & $0.0012$ & $0.983$  \\
+Categorical CEM        & $\mathbf{3458.5}$ & $0.0000$ & $0.9995$ \\
+Binned CEM, $k{=}10$   & $3460.8$ & $0.0041$ & $0.933$  \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Counterfactual editing.} Shapes3D contains every combination of
+its six factors, so for any image $A$ and any change of its factor values the
+true edited image $B$ exists. We measure edits by decoding
+$\operatorname{cem}(\mu_A, c_B)$ and comparing with the real $B$
+(\emph{CF error}, BCE summed over pixels; the ``no edit'' reference compares the
+plain reconstruction of $A$ with $B$), and by an independent concept classifier
+trained on real images only (100\% accuracy on real test images), which reads
+the concepts of the edited image (\emph{judge accuracy}: fraction of concepts
+within half a factor level of the request). $B$ differs from $A$ in exactly one
+concept, or in $k \sim \mathcal{U}\{1, \dots, 5\}$ concepts.
+2{,}048 test images.
+
+\paragraph{Counterfactual training.} The standard models do not obey edits
+(Table~\ref{tab:app-cf}, ``standard''): the cycle-consistency term can be
+satisfied by a private code between the bottleneck and its own concept reader.
+We therefore fine-tune with an additional loss
+$\mathrm{BCE}\big(\operatorname{dec}(\operatorname{cem}(z_A, c_B)),\, x_B\big)$,
+with $B$ drawn as above ($k \sim \mathcal{U}\{1, \dots, 5\}$), starting from the
+standard checkpoints, for 3 passes over 100k images (learning rate $10^{-4}$).
+This loss requires ground-truth counterfactual images and is therefore only
+available on fully factorial synthetic data; it is extra supervision and must
+be applied equally to every model. \todo{Retrain all models with this loss.}
+
+\begin{table}[h]
+\centering\small
+\caption{Shapes3D counterfactual edits, 2{,}048 test images. CF error: lower
+is better; judge accuracy: higher is better. ``No edit'' is the error of the
+unedited reconstruction against the target, i.e.\ what ignoring the
+intervention would cost. Categorical CEM (standard training) is shown for
+reference.}
+\label{tab:app-cf}
+\begin{tabular}{llcccccc}
+\toprule
+ & & & \multicolumn{2}{c}{\textbf{1 concept changed}} & \multicolumn{3}{c}{\textbf{1--5 concepts changed}} \\
+\cmidrule(lr){4-5}\cmidrule(lr){6-8}
+\textbf{Model} & \textbf{Training} & \textbf{Recon.} & \textbf{CF err.} & \textbf{Judge} &
+\textbf{CF err.} & \textbf{No edit} & \textbf{Judge} \\
+\midrule
+CEM (ours)      & standard       & $3463$ & $5272$ & $0.709$ & $8396$ & $19316$ & $0.453$ \\
+CEM-Linear      & standard       & $3462$ & $4846$ & $0.743$ & $7017$ & $19411$ & $0.483$ \\
+Categorical CEM & standard       & $3462$ & $3629$ & $\mathbf{0.981}$ & $4028$ & $18335$ & $\mathbf{0.934}$ \\
+\midrule
+CEM (ours)      & + counterfact. & $3494$ & $\mathbf{3545}$ & $0.979$ & $\mathbf{3651}$ & $18329$ & $0.928$ \\
+CEM-Linear      & + counterfact. & $3496$ & $3830$ & $0.848$ & $4267$ & $15875$ & $0.682$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Zero test for generation.} Setting a concept to $0$ removes its
+whole block in CEM-Linear ($0 \cdot \varphi_i(z)$), whereas CEM keeps the
+input-dependent midpoint of its two anchors. Because shape is not a concept,
+an edited image can keep its shape only if the concept blocks carry it. We
+set $j$ concepts of real test images to $0$ (normalised units: hue $0.45$,
+scale $1.0$, orientation $0^\circ$), keep the others at their true values, and
+classify the shape of the output with a classifier trained on real images
+(100\% accuracy on real test images). Averaged over all subsets of size $j$.
+
+\begin{table}[h]
+\centering\small
+\caption{Identity preservation under zero-valued interventions (counterfactually
+fine-tuned models, 2{,}048 test images). Shape accuracy: chance is $0.25$.
+Judge error: mean absolute error of the independent classifier on the concepts
+that were \emph{not} edited (normalised units). Output spread: per-pixel
+standard deviation across the 2{,}048 outputs when all five concepts are $0$.}
+\label{tab:app-zero-gen}
+\begin{tabular}{lcccc}
+\toprule
+ & \multicolumn{2}{c}{\textbf{CEM (ours)}} & \multicolumn{2}{c}{\textbf{CEM-Linear}} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}
+\textbf{Concepts set to 0} & \textbf{Shape acc.} & \textbf{Judge err.} & \textbf{Shape acc.} & \textbf{Judge err.} \\
+\midrule
+0 (reconstruction) & $1.000$ & ---     & $1.000$ & ---     \\
+1                  & $\mathbf{0.999}$ & $\mathbf{0.025}$ & $0.995$ & $0.041$ \\
+2                  & $\mathbf{0.996}$ & $\mathbf{0.027}$ & $0.973$ & $0.092$ \\
+3                  & $\mathbf{0.992}$ & $\mathbf{0.029}$ & $0.888$ & $0.196$ \\
+4                  & $\mathbf{0.992}$ & $\mathbf{0.031}$ & $0.701$ & $0.403$ \\
+5                  & $\mathbf{0.998}$ & ---     & $0.253$ & ---     \\
+\midrule
+Output spread, all 5 at 0 & \multicolumn{2}{c}{$0.047$} & \multicolumn{2}{c}{$0.000$ (identical images)} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Scale invariance of CEM-Linear.} With all five concepts set to the
+same value $\alpha$, CEM-Linear produces the same image for every
+$\alpha > 0$ (and another for every $\alpha < 0$; shape accuracy $0.675$ and
+$0.520$), because its output LayerNorm removes any global rescaling of the
+concept vector; only the sign pattern reaches the decoder. CEM responds to
+$\alpha$ continuously (shape accuracy $0.81$--$1.00$).
+
+\paragraph{Single-concept zero test (orientation).} Orientation is the only
+Shapes3D concept with a grid level exactly at $0$ ($0^\circ$).
+Table~\ref{tab:app-orient} gives the CF error of editing only the orientation
+to each target angle. Neither model degrades at $0^\circ$: with four other
+concept blocks available, a single zeroed block is compensated. The failure
+appears when several blocks are zeroed (Table~\ref{tab:app-zero-gen}).
+
+\begin{table}[h]
+\centering\small
+\caption{CF error when editing only the orientation to the given angle
+(2{,}048 test images, lower is better).}
+\label{tab:app-orient}
+\begin{tabular}{lccccccc}
+\toprule
+\textbf{Model} & $-30^\circ$ & $-13^\circ$ & $-4^\circ$ & $\mathbf{0^\circ}$ & $+4^\circ$ & $+13^\circ$ & $+30^\circ$ \\
+\midrule
+CEM-Linear, standard       & $6158$ & $3836$ & $3359$ & $3306$ & $3333$ & $3896$ & $6144$ \\
+CEM (ours) + counterfact.  & $3906$ & $3474$ & $3340$ & $3328$ & $3319$ & $3429$ & $3803$ \\
+CEM-Linear + counterfact.  & $4147$ & $3600$ & $3479$ & $3476$ & $3472$ & $3586$ & $4067$ \\
+\bottomrule
+\end{tabular}
+\end{table}

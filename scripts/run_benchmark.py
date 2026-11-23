@@ -8,8 +8,12 @@ Models (same encoder, head and training loop; only the bottleneck differs):
     cbm             scalar bottleneck: the head sees k numbers (per-concept MLP
                     predictor, same size as the CEM concept networks)
     cem             two anchors, continuous interpolation        OUR METHOD (Case 3.5)
-    cem_linear      one embedding x concept value, LayerNorm
-    cem_linear_raw  one embedding x concept value, NO LayerNorm  (the paper's CEM-Linear-Raw)
+    cem_linear      one embedding x concept value, LayerNorm            (concepts in [-1,1])
+    cem_linear_raw  as cem_linear, but the concepts are in RAW units: the model predicts the
+                    raw values (concept loss in raw units), gates with them, and receives raw
+                    values under intervention (e.g. digits 1..9, LIDC volume in mm^3)
+    cem_linear_noln as cem_linear without the LayerNorm, concepts in [-1,1]
+                    (this was called cem_linear_raw before 2026-11-23)
     binned5/10/15   each concept's [-1,1] range cut into k uniform bins,
                     categorical anchors (Case 3)
     nn              no bottleneck (optional accuracy anchor, not in the default set)
@@ -34,6 +38,8 @@ accuracy and balanced accuracy):
     task_*            no intervention
     interv_*          every concept replaced by the truth
     concept_mse       concept error in [-1,1] units (binned: the bin centre)
+    concept_mae_raw_<c>  concept error in the concept's own units, per concept
+    concept_mae_rel   raw MAE / range of the concept, averaged (comparable across concepts)
     concept_acc       binned only: bin accuracy
     zero group = test samples with at least one concept within --zero-tol of 0:
     zero_task_*       no intervention, on the zero group
@@ -46,6 +52,7 @@ Usage
     python scripts/run_benchmark.py --dataset mnist                       # 7 models x 30 seeds
     python scripts/run_benchmark.py --dataset lidc --models cem cem_linear --seeds 5
     python scripts/run_benchmark.py --dataset mnist --summarize           # mean +/- std table
+    python scripts/run_benchmark.py --dataset lidc --eval-only            # re-evaluate saved models
 
 Output (resumable: a finished (model, seed) is skipped on rerun)
     outputs/results/benchmark/<dataset>/<model>.csv      one row per seed
@@ -77,7 +84,7 @@ from cbmc.concepts.categorical import CEMCategoricalPerConcept
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MODELS = ["cbm", "cem", "cem_linear", "cem_linear_raw", "binned5", "binned10", "binned15"]
-ALL_MODELS = DEFAULT_MODELS + ["nn"]
+ALL_MODELS = DEFAULT_MODELS + ["cem_linear_noln", "nn"]
 
 
 def set_seed(s):
@@ -155,6 +162,7 @@ def _mnist(args, seed):
     ys = torch.tensor(ys, dtype=torch.float32)
     return dict(train=_Map(tr, norm), test=_Map(te, norm),
                 encoder=lambda: Conv2DEncoder(1), concepts=["digit_a", "digit_b"],
+                lo=torch.tensor([1.0, 1.0]), hi=torch.tensor([9.0, 9.0]),       # (d-5)/4 == min-max on 1..9
                 task="regression", n_out=1, y_mean=ys.mean(), y_std=ys.std(),
                 class_weight=None,
                 defaults=dict(epochs=30, lr=1e-3, batch_size=128, weight_decay=0.0,
@@ -181,7 +189,7 @@ def _pendulum(args, seed):
         g = torch.Generator().manual_seed(seed)
         train = Subset(train, torch.randperm(len(train), generator=g)[:args.max_train].tolist())
     return dict(train=train, test=test, encoder=lambda: Conv2DEncoder(3),
-                concepts=["theta", "phi"], task="regression", n_out=2,
+                concepts=["theta", "phi"], task="regression", n_out=2, lo=lo.float(), hi=hi.float(),
                 y_mean=y_mean, y_std=y_std, class_weight=None,
                 defaults=dict(epochs=20, lr=1e-3, batch_size=64, weight_decay=0.0,
                               concept_weight=1.0, intervention_prob=0.25))
@@ -203,6 +211,7 @@ def _lidc(args, seed):
     return dict(train=LIDCNodules(train_df, tf, data_cfg, augment=True, jitter=3),
                 test=LIDCNodules(test_df, tf, data_cfg),
                 encoder=lambda: Conv3DEncoder(backbone), concepts=list(data_cfg.concepts),
+                lo=torch.tensor(tf.lo, dtype=torch.float), hi=torch.tensor(tf.hi, dtype=torch.float),
                 task="classification", n_out=2, y_mean=None, y_std=None,
                 class_weight=torch.tensor(counts.sum() / (2.0 * counts), dtype=torch.float),
                 defaults=dict(epochs=250, lr=1e-3, batch_size=16, weight_decay=0.01,
@@ -260,9 +269,13 @@ class ConceptModel(nn.Module):
     concept_pred: [B, C] in [-1,1] for continuous models; list of logits for binned.
     """
 
-    def __init__(self, kind, encoder, n_concepts, n_out, emb=16, hidden=64, depth=2, dropout=0.1):
+    def __init__(self, kind, encoder, n_concepts, n_out, emb=16, hidden=64, depth=2, dropout=0.1,
+                 lo=None, hi=None):
         super().__init__()
         self.kind, self.encoder, self.C = kind, encoder, n_concepts
+        # raw range of every concept: c_raw = lo + (c + 1) / 2 * (hi - lo)
+        self.register_buffer("lo", torch.as_tensor(lo if lo is not None else -torch.ones(n_concepts)).float().view(-1))
+        self.register_buffer("hi", torch.as_tensor(hi if hi is not None else torch.ones(n_concepts)).float().view(-1))
         d = encoder.out_dim
         self.k = n_bins_of(kind)
         if kind == "nn":
@@ -277,7 +290,8 @@ class ConceptModel(nn.Module):
             if self.k:
                 self.bott = CEMCategoricalPerConcept(d, [self.k] * n_concepts, emb, hidden, depth, dropout)
             else:
-                cls = {"cem": CEM, "cem_linear": CEMLinear, "cem_linear_raw": CEMLinearRaw}[kind]
+                cls = {"cem": CEM, "cem_linear": CEMLinear, "cem_linear_raw": CEMLinear,
+                       "cem_linear_noln": CEMLinearRaw}[kind]
                 self.bott = cls(d, n_concepts, emb, hidden, depth, dropout)
             self.head = nn.Linear(self.bott.output_dim, n_out)
 
@@ -293,8 +307,21 @@ class ConceptModel(nn.Module):
             return self.head(used), c
         if self.k and interv is not None:
             interv = to_bins(interv, self.k)
+        if self.raw:                                   # the bottleneck lives in raw units
+            emb, c_raw = self.bott(h, None if interv is None else self.to_raw(interv), mask)
+            return self.head(emb), self.to_norm(c_raw)
         emb, c = self.bott(h, interv, mask)
         return self.head(emb), c
+
+    @property
+    def raw(self):
+        return self.kind == "cem_linear_raw"
+
+    def to_raw(self, c):
+        return self.lo + (c + 1) / 2 * (self.hi - self.lo)
+
+    def to_norm(self, r):
+        return 2 * (r - self.lo) / (self.hi - self.lo) - 1
 
     def decode(self, c):
         """concept prediction -> [B, C] in [-1,1]."""
@@ -309,6 +336,8 @@ def concept_loss(model, pred, c_true):
     if model.k:
         t = to_bins(c_true, model.k)
         return torch.stack([F.cross_entropy(lg, t[:, i]) for i, lg in enumerate(pred)]).mean()
+    if getattr(model, "raw", False):                  # predict the raw values: loss in raw units
+        return F.mse_loss(model.to_raw(pred), model.to_raw(c_true))
     return F.mse_loss(pred, c_true)
 
 
@@ -337,7 +366,15 @@ def train_one(model, D, hp, device, args):
             interv = c if (model.kind != "nn" and random.random() < hp["intervention_prob"]) else None
             out, cp = model(x, interv)
             lt, lc = task_loss(out, y), concept_loss(model, cp, c)
-            opt.zero_grad(); (lt + hp["concept_weight"] * lc).backward(); opt.step()
+            loss = lt + hp["concept_weight"] * lc
+            if args.cf_weight > 0 and model.kind != "nn" and len(x) > 1:
+                # counterfactual "swap": input A with ALL concepts of another sample B, target y_B.
+                # Exact only if the concepts fully determine the label (pendulum); on LIDC it is a
+                # proxy that forces the prediction to follow the concepts.
+                perm = torch.randperm(len(x), device=device)
+                out_cf, _ = model(x, c[perm])
+                loss = loss + args.cf_weight * task_loss(out_cf, y[perm])
+            opt.zero_grad(); loss.backward(); opt.step()
             tot_t += lt.item() * len(x); tot_c += lc.item() * len(x); n += len(x)
         history.append(dict(epoch=ep, task_loss=tot_t / n, concept_loss=tot_c / n,
                             seconds=round(time.time() - t0, 1)))
@@ -365,7 +402,8 @@ def _task_metrics(out, y, D, prefix):
 def evaluate(model, D, device, args):
     model.eval()
     loader = DataLoader(D["test"], batch_size=256, shuffle=False, num_workers=args.num_workers)
-    keep = {k: [] for k in ("y", "out", "out_all", "out_zero", "c", "chat", "zero", "bin_ok")}
+    keep = {k: [] for k in ("y", "out", "out_all", "out_zero", "c", "chat", "zero", "bin_ok", "out_swap", "y_swap")}
+    g = torch.Generator().manual_seed(0)
     for x, c, y in loader:
         x, c = x.to(device), c.to(device).float()
         zero = c.abs() <= args.zero_tol                         # [B, C]
@@ -375,6 +413,8 @@ def evaluate(model, D, device, args):
             continue
         keep["out_all"].append(model(x, c)[0].cpu())
         keep["out_zero"].append(model(x, c, zero.float())[0].cpu())
+        perm = torch.randperm(len(x), generator=g).to(device)        # swap test: A's input, B's concepts
+        keep["out_swap"].append(model(x, c[perm])[0].cpu()); keep["y_swap"].append(y[perm.cpu()])
         keep["c"].append(c.cpu()); keep["chat"].append(model.decode(cp).cpu())
         if model.k:
             pred_bins = torch.stack([lg.argmax(1) for lg in cp], 1)
@@ -390,11 +430,18 @@ def evaluate(model, D, device, args):
     res.update(_task_metrics(cat["out"][~zrow], y[~zrow], D, "nonzero_task"))
     if model.kind != "nn":
         res.update(_task_metrics(cat["out_all"], y, D, "interv"))
+        res.update(_task_metrics(cat["out_swap"], cat["y_swap"], D, "swap"))      # follows B's concepts?
+        res.update(_task_metrics(cat["out_swap"], y, D, "swapA"))                  # ... or still A's label?
         res.update(_task_metrics(cat["out_zero"][zrow], y[zrow], D, "zero_interv0"))
         res.update(_task_metrics(cat["out_all"][zrow], y[zrow], D, "zero_interv"))
         res.update(_task_metrics(cat["out_all"][~zrow], y[~zrow], D, "nonzero_interv"))
         se = (cat["chat"] - cat["c"]) ** 2
         res["concept_mse"] = se.mean().item()
+        lo, hi = model.lo.cpu(), model.hi.cpu()
+        err_raw = ((cat["chat"] - cat["c"]) / 2 * (hi - lo)).abs()          # [N, C], concept units
+        for i, name in enumerate(D.get("concepts", [])):
+            res[f"concept_mae_raw_{name}"] = err_raw[:, i].mean().item()
+        res["concept_mae_rel"] = (err_raw / (hi - lo)).mean().item()
         res["zero_concept_mse"] = se[zero].mean().item() if zero.any() else float("nan")
         if model.k:
             res["concept_acc"] = cat["bin_ok"].float().mean().item()
@@ -405,8 +452,16 @@ def evaluate(model, D, device, args):
 # Bookkeeping
 # ===========================================================================
 
+OUT_ROOT = ROOT / "outputs"          # --out-root changes it (e.g. a scratch folder for quick tests)
+MODEL_ROOT = lambda: OUT_ROOT / "models" / "benchmark"
+
+
 def result_file(dataset, model):
-    return ROOT / "outputs" / "results" / "benchmark" / dataset / f"{model}.csv"
+    return OUT_ROOT / "results" / "benchmark" / dataset / f"{model}.csv"
+
+
+def run_name(model, tag):
+    return f"{model}_{tag}" if tag else model
 
 
 def done_seeds(path):
@@ -425,13 +480,14 @@ def append_row(path, row):
         w = csv.DictWriter(f, fieldnames=keys); w.writeheader(); w.writerows(rows)
 
 
-def summarize(dataset):
-    d = ROOT / "outputs" / "results" / "benchmark" / dataset
-    files = sorted(d.glob("*.csv"))
+def summarize(dataset, tag=""):
+    d = OUT_ROOT / "results" / "benchmark" / dataset
+    files = sorted(d.glob(f"*_{tag}.csv" if tag else "*.csv"))
     if not files:
         raise SystemExit(f"no results in {d}")
     order = {m: i for i, m in enumerate(ALL_MODELS)}
-    files.sort(key=lambda p: order.get(p.stem, 99))
+    base = lambda p: p.stem[: -len(tag) - 1] if tag and p.stem.endswith("_" + tag) else p.stem
+    files.sort(key=lambda p: (order.get(base(p), 99), p.stem))
     skip = {"dataset", "model", "seed", "epochs", "n_test", "n_zero"}
     out_rows, metrics = [], []
     for p in files:
@@ -446,16 +502,16 @@ def summarize(dataset):
                 if k not in metrics:
                     metrics.append(k)
         out_rows.append(s)
-    out = d.parent / f"{dataset}_summary.csv"
+    out = d.parent / (f"{dataset}_{tag}_summary.csv" if tag else f"{dataset}_summary.csv")
     keys = list(dict.fromkeys(k for r in out_rows for k in r))
     with open(out, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=keys); w.writeheader(); w.writerows(out_rows)
     show = [m for m in metrics if any(m.startswith(p) for p in
-            ("task_", "interv_", "concept_", "zero_", "nonzero_"))
+            ("task_", "interv_", "concept_", "zero_", "nonzero_", "swap"))
             and m not in ("params", "train_seconds")]
     print(f"\n{dataset}: mean ± std over seeds\n")
-    print(f"{'metric':22}" + "".join(f"{r['model']:>18}" for r in out_rows))
-    print(f"{'seeds':22}" + "".join(f"{r['seeds']:>18}" for r in out_rows))
+    print(f"{'metric':26}" + "".join(f"{r['model']:>22}" for r in out_rows))
+    print(f"{'seeds':26}" + "".join(f"{r['seeds']:>22}" for r in out_rows))
     for m in show:
         cells = []
         for r in out_rows:
@@ -463,7 +519,7 @@ def summarize(dataset):
                 cells.append(f"{r[f'{m}_mean']:.4g} ± {r[f'{m}_std']:.2g}")
             else:
                 cells.append("—")
-        print(f"{m:22}" + "".join(f"{c:>18}" for c in cells))
+        print(f"{m:26}" + "".join(f"{c:>22}" for c in cells))
     print(f"\nsaved {out}")
 
 
@@ -489,23 +545,34 @@ def main():
                     help="a concept counts as zero if |c| <= this, in [-1,1] units")
     ap.add_argument("--operators", nargs="+", default=["+", "x"], help="mnist only")
     ap.add_argument("--max-train", type=int, default=None, help="pendulum only: subsample the 70k training images")
+    ap.add_argument("--cf-weight", type=float, default=0.0,
+                    help="weight of the counterfactual swap loss (input A, concepts of B, target y_B); 0 = off")
+    ap.add_argument("--out-root", default=None, help="write results/models under this folder instead of outputs/")
+    ap.add_argument("--tag", default="", help="suffix for result/model files, e.g. cf -> cem_cf.csv")
     ap.add_argument("--num-workers", type=int, default=2)
     ap.add_argument("--device", default=None, choices=["cuda", "mps", "cpu"])
     ap.add_argument("--no-save-models", action="store_true")
     ap.add_argument("--overwrite", action="store_true", help="retrain seeds that already have results")
     ap.add_argument("--summarize", action="store_true", help="only print / write the mean ± std table")
+    ap.add_argument("--eval-only", action="store_true",
+                    help="no training: load outputs/models/benchmark/<dataset>/<model>_seed<N>.pt and "
+                         "re-evaluate (results go to the usual csv; use --tag / --out-root to keep them apart)")
     a = ap.parse_args()
     os.chdir(ROOT)
+    global OUT_ROOT
+    if a.out_root:
+        OUT_ROOT = Path(a.out_root).resolve()
 
     if a.summarize:
-        summarize(a.dataset); return
+        summarize(a.dataset, a.tag); return
 
     device = get_device(a.device)
     seeds = list(range(a.first_seed, a.first_seed + a.seeds))
     print(f"dataset {a.dataset} | models {a.models} | seeds {seeds[0]}..{seeds[-1]} | device {device}")
 
     for model_name in a.models:
-        path = result_file(a.dataset, model_name)
+        rname = run_name(model_name, a.tag)
+        path = result_file(a.dataset, rname)
         if a.overwrite and path.exists():
             path.unlink()
         have = done_seeds(path)
@@ -519,21 +586,45 @@ def main():
                 if getattr(a, k) is not None:
                     hp[k] = getattr(a, k)
             model = ConceptModel(model_name, D["encoder"](), len(D["concepts"]), D["n_out"],
-                                 a.embedding_dim, a.hidden_dim, a.depth, a.dropout).to(device)
+                                 a.embedding_dim, a.hidden_dim, a.depth, a.dropout,
+                                 lo=D.get("lo"), hi=D.get("hi")).to(device)
+            if a.eval_only:
+                ck = MODEL_ROOT() / a.dataset / f"{model_name}_seed{seed}.pt"
+                if not ck.exists():
+                    print(f"  seed {seed}: no checkpoint {ck}, skipped"); continue
+                ck = torch.load(ck, map_location=device, weights_only=False)
+                sd = {k: v for k, v in ck["state_dict"].items() if k not in ("lo", "hi")}
+                if model.kind == "cbm" and "cbm.weight" in sd:          # pre-2026-11-12 CBM: one Linear layer
+                    model.cbm = nn.ModuleList([nn.Linear(sd["cbm.weight"].shape[1], sd["cbm.weight"].shape[0])]).to(device)
+                    sd["cbm.0.weight"], sd["cbm.0.bias"] = sd.pop("cbm.weight"), sd.pop("cbm.bias")
+                    print(f"  seed {seed}: old CBM checkpoint (linear concept read-out)")
+                try:
+                    missing, unexpected = model.load_state_dict(sd, strict=False)
+                    bad = [k for k in missing if k not in ("lo", "hi")] + list(unexpected)
+                    if bad:
+                        raise RuntimeError(f"architecture mismatch: {bad[:3]}")
+                except RuntimeError as e:
+                    print(f"  seed {seed}: cannot load ({str(e)[:120]}), skipped"); continue
+                res = evaluate(model, D, device, a)
+                append_row(path, {"dataset": a.dataset, "model": rname, "seed": seed,
+                                  "epochs": ck["hp"]["epochs"], "params": sum(p.numel() for p in model.parameters()),
+                                  "train_seconds": "", **res})
+                print(f"  seed {seed}: re-evaluated", flush=True)
+                continue
             n_par = sum(p.numel() for p in model.parameters())
             print(f"  seed {seed}: {n_par:,} params | {hp}", flush=True)
             t0 = time.time()
             history = train_one(model, D, hp, device, a)
             res = evaluate(model, D, device, a)
-            row = {"dataset": a.dataset, "model": model_name, "seed": seed, "epochs": hp["epochs"],
+            row = {"dataset": a.dataset, "model": rname, "seed": seed, "epochs": hp["epochs"], "cf_weight": a.cf_weight,
                    "params": n_par, "train_seconds": round(time.time() - t0, 1), **res}
             append_row(path, row)
             if not a.no_save_models:
-                mdir = ROOT / "outputs" / "models" / "benchmark" / a.dataset
+                mdir = MODEL_ROOT() / a.dataset
                 mdir.mkdir(parents=True, exist_ok=True)
                 torch.save({"state_dict": model.state_dict(), "model": model_name, "seed": seed,
                             "hp": hp, "concepts": D["concepts"], "history": history, "result": res},
-                           mdir / f"{model_name}_seed{seed}.pt")
+                           mdir / f"{rname}_seed{seed}.pt")
             key = "task_mse" if "task_mse" in res else "task_bacc"
             msg = f"  seed {seed} done: {key} {res.get(key, float('nan')):.4f}"
             if f"zero_interv0_{key[5:]}" in res:
@@ -542,7 +633,7 @@ def main():
             print(msg, flush=True)
         print(f"  -> {path}")
 
-    summarize(a.dataset)
+    summarize(a.dataset, a.tag)
 
 
 if __name__ == "__main__":

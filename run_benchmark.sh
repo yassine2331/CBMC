@@ -7,6 +7,7 @@
 #  models; only the bottleneck differs:
 #
 #    cbm  cem (ours, Case 3.5)  cem_linear  cem_linear_raw  binned5  binned10  binned15
+#    (cem_linear_raw = concepts in RAW units; cem_linear_noln = no LayerNorm, on request)
 #    (+ nn, no bottleneck, if you ask for it with --models)
 #
 #  Datasets: mnist  pendulum  lidc        (oai: not runnable until images exist)
@@ -110,7 +111,7 @@ for d in $DATASETS; do
     esac
 done
 for m in $MODELS; do
-    case "$m" in cbm|cem|cem_linear|cem_linear_raw|binned5|binned10|binned15|nn) ;;
+    case "$m" in cbm|cem|cem_linear|cem_linear_raw|cem_linear_noln|binned5|binned10|binned15|nn) ;;
         *) echo "ERROR: unknown model '$m'" >&2; exit 1 ;;
     esac
 done

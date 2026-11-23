@@ -49,8 +49,9 @@
 #  OPTIONS
 #  -------
 #    --epochs N              epochs per variant                 default 50
-#    --n-samples N           random subset of the 480k images   default 300000
-#                            (0 = all; ~6 GB RAM, ~2.4x slower than 200k)
+#    --n-samples N           random subset of the 480k images   default 0 = ALL
+#                            (all 480k: 10% test, 5% val, 85% = 408k train;
+#                            ~12 GB RAM peak while splitting)
 #    --n-bins N              bins per concept for `binned`      default 10
 #    --concepts "A B ..."    subset of the 6 factors            default all 6
 #                            e.g. --concepts "floor_hue wall_hue object_hue scale orientation"
@@ -91,9 +92,9 @@
 #
 #  COST (rough, from a local run: ~0.55 ms per image per epoch for cem)
 #  ----
-#  defaults (300k x 50 epochs): vae/cbm ~1.5-2 h, cem/cem_linear ~2-2.5 h,
-#  binned ~4 h, categorical ~6 h. With --parallel the wall time is the
-#  slowest variant; all fit in the 24 h limit.
+#  defaults (all 480k x 50 epochs, measured x1.6 from the 300k runs):
+#  vae ~45 min, cbm/cem/cem_linear ~1.5-1.7 h, categorical/binned ~2 h.
+#  With --parallel the wall time is the slowest variant.
 #
 #
 #  OUTPUT, and getting it back to the laptop
@@ -134,7 +135,7 @@ H5_URL="https://storage.googleapis.com/3d-shapes/3dshapes.h5"
 usage () { sed -n '2,/^# ====.*$/p' "$0" | sed 's/^# \{0,1\}//'; }
 
 EPOCHS="${EPOCHS:-50}"
-N_SAMPLES="${N_SAMPLES:-300000}"
+N_SAMPLES="${N_SAMPLES:-0}"   # 0 = all 480k images
 N_BINS="${N_BINS:-10}"
 CONCEPTS="${CONCEPTS:-}"
 BATCH_SIZE="${BATCH_SIZE:-}"
