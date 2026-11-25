@@ -1,6 +1,6 @@
 % =====================================================================
 %  Appendix: full results.  Generated from outputs/results/benchmark/*
-%  (prediction, 30 seeds) and outputs/models/shapes3d_* (generation).
+%  (prediction, 30 seeds, re-evaluated: <model>_eval.csv) and outputs/models/shapes3d_* (generation).
 %  Paste after \appendix.  Needs booktabs and the \todo macro of main.tex.
 % =====================================================================
 
@@ -21,7 +21,7 @@ $w_i e_i^{+} + (1 - w_i) e_i^{-}$ with $w_i = \operatorname{clamp}(c_i/2 + 1/2, 
 $c_i\,\varphi_i(z)$, followed by LayerNorm.
 \textbf{CEM-Linear (no LN)}: the same without LayerNorm.
 \textbf{CEM-Linear (raw units)}: as CEM-Linear, but the concepts are kept in
-their original units (digits 569Xl-$, angles, LIDC-IDRI ratings, mm, mm$):
+their original units (digits $1$--$9$, angles, LIDC-IDRI ratings and sizes in mm, mm$^2$, mm$^3$):
 the model predicts the raw values, gates its embeddings with them and receives
 raw values under intervention. \todo{Not run yet.}
 \textbf{Binned, $k$}: each concept is discretised into $k$ equal-width bins and
@@ -40,13 +40,31 @@ Each model is trained with 30 seeds (41--70).
 \paragraph{Metrics.}
 \emph{Task}: prediction error without intervention.
 \emph{Interv.}: all predicted concepts replaced by the ground truth.
-\emph{Concept MSE}: error of the predicted concepts in normalised units (for
-binned models, of the predicted bin centre).
+All errors are \emph{mean absolute errors in raw units}, so that they can be
+read in the units of the data: the task error in the units of the target, and
+the concept error after mapping the predicted concepts back to the units of the
+dataset (digits, angles, rating points, mm, mm$^2$, mm$^3$; for binned models,
+the predicted bin centre). On LIDC-IDRI, \emph{rel.}\ divides the concept error
+by the concept's range so that the nine concepts can be averaged. Mean squared
+errors are in the result files; they penalise rare large errors more, and the
+only conclusion that differs is noted in Table~\ref{tab:app-mnist}.
+\emph{Swap test}: each test input $x_A$ receives all the concepts $c_B$ of
+another test sample (a fixed random pairing, identical for all models), and the
+output is compared with $y_B$ and with $y_A$. It measures whether an
+intervention that contradicts the input is followed. It is reported for
+Pendulum, where $y$ is a function of the concepts, and for LIDC-IDRI; it is
+not defined for ArithmeticMNIST, whose operator is read from the image and is
+not a concept.
 \emph{Zero test}: a test sample belongs to the zero group if at least one of
 its concepts satisfies $|c_i| \le 0.025$ in normalised units. On this group we
 report the task error without intervention, after fixing \emph{only} the
 zero-valued concept(s) to the truth, and after fixing all concepts; the last
 column repeats full intervention on the complementary (non-zero) group.
+
+\paragraph{Evaluation.} All numbers are computed by re-evaluating the saved
+checkpoints of every seed with one script (\texttt{eval\_local.sh}); task and
+concept metrics agree with those logged at the end of training up to GPU
+non-determinism.
 
 \paragraph{Statistics.} We report mean $\pm$ standard deviation over seeds and
 compare every model with CEM (ours) by a two-sided Wilcoxon signed-rank test
@@ -70,38 +88,38 @@ within a seed).
 
 \begin{table}[h]
 \centering\small
-\caption{ArithmeticMNIST, 30 seeds, 30 epochs. Task: the result of $a \circ b$ with $\circ \in \{+,\times\}$ (regression, raw units). ``Interv.'' replaces both predicted digits with the ground truth. Concept accuracy (correct bin) only exists for binned models; it is bin accuracy, not digit accuracy (with $k{=}5$, digits 1--2, 3--4, 6--7 and 8--9 share a bin). Concept MSE is measured at the bin centre, so even perfect bins have a quantisation floor ($0.0167$, $0.0044$ and $0.0019$ for $k = 5, 10, 15$). Mean $\pm$ standard deviation over seeds. Bold: best mean among models with all 30 seeds. $^{\circ}$: \emph{not} significantly different from CEM (ours) (two-sided Wilcoxon signed-rank test paired by seed, $p \ge 0.05$); every unmarked difference is significant. \ddag: original CBM with a linear concept read-out (see Section~\ref{app:caveats}).}
+\caption{ArithmeticMNIST, 30 seeds, 30 epochs. Task: the result of $a \circ b$ with $\circ \in \{+,\times\}$ (regression, raw units). ``Interv.'' replaces both predicted digits with the ground truth. All errors are mean absolute errors in raw units: task MAE in units of the result, digit MAE the error of the predicted digits in digit units ($1$--$9$), averaged over $a$ and $b$. Bin accuracy only exists for binned models; it is not digit accuracy (with $k{=}5$, digits 1--2, 3--4, 6--7 and 8--9 share a bin). Binned concept errors are measured at the bin centre, so even perfect bins have a quantisation floor. Under MSE (result files), Binned $k{=}5$ is not significantly different from CEM (ours) on task error ($21.0$ vs.\ $22.5$); under MAE it is better ($2.17$ vs.\ $2.59$). Mean $\pm$ standard deviation over seeds. Bold: best mean. $^{\circ}$: \emph{not} significantly different from CEM (ours) (two-sided Wilcoxon signed-rank test paired by seed, $p \ge 0.05$); every unmarked difference is significant. \ddag: original CBM with a linear concept read-out (see Section~\ref{app:caveats}).}
 \label{tab:app-mnist}
 \begin{tabular}{lcccc}
 \toprule
-\textbf{Model} & \textbf{Task MSE} & \textbf{Interv.\ MSE} & \textbf{Concept MSE} & \textbf{Concept acc.} \\
+\textbf{Model} & \textbf{Task MAE} & \textbf{Interv.\ MAE} & \textbf{Digit MAE} & \textbf{Bin acc.} \\
 \midrule
-CBM\,\textsuperscript{\ddag} & $58.63 \pm 19.44$ & $147.17 \pm 3.87$ & $0.1713 \pm 0.0234$ & --- \\
-CEM (ours) & $22.54 \pm 2.56$ & $5.10 \pm 1.29$ & $0.0513 \pm 0.0053$ & --- \\
-CEM-Linear & $30.06 \pm 5.21$ & $18.16 \pm 4.57$ & $0.0715 \pm 0.0219$ & --- \\
-CEM-Linear (no LN) & $44.57 \pm 12.01$ & $23.28 \pm 7.67$ & $0.1284 \pm 0.0622$ & --- \\
-Binned, $k{=}5$ & $21.01 \pm 4.23^{\circ}$ & $4.17 \pm 1.22$ & $0.0593 \pm 0.0099$ & $0.928 \pm 0.016$ \\
-Binned, $k{=}10$ & $14.89 \pm 3.00$ & $2.50 \pm 0.56$ & $0.0366 \pm 0.0062$ & $0.942 \pm 0.012$ \\
-Binned, $k{=}15$ & $\mathbf{13.91 \pm 3.19}$ & $\mathbf{1.47 \pm 0.58}$ & $\mathbf{0.0348 \pm 0.0062}$ & $\mathbf{0.946 \pm 0.010}$ \\
+CBM\,\textsuperscript{\ddag} & $4.91 \pm 0.69$ & $8.22 \pm 0.16$ & $1.326 \pm 0.091$ & --- \\
+CEM (ours) & $2.59 \pm 0.18$ & $1.30 \pm 0.15$ & $0.617 \pm 0.043$ & --- \\
+CEM-Linear & $3.19 \pm 0.31$ & $2.63 \pm 0.35$ & $0.769 \pm 0.127$ & --- \\
+CEM-Linear (no LN) & $4.14 \pm 0.65$ & $3.43 \pm 0.57$ & $1.084 \pm 0.280$ & --- \\
+Binned, $k{=}5$ & $2.17 \pm 0.27$ & $1.33 \pm 0.17^{\circ}$ & $0.620 \pm 0.037^{\circ}$ & $0.928 \pm 0.016$ \\
+Binned, $k{=}10$ & $1.75 \pm 0.20$ & $1.06 \pm 0.12$ & $0.363 \pm 0.028$ & $0.942 \pm 0.012$ \\
+Binned, $k{=}15$ & $\mathbf{1.55 \pm 0.21}$ & $\mathbf{0.84 \pm 0.15}$ & $\mathbf{0.290 \pm 0.025}$ & $\mathbf{0.946 \pm 0.010}$ \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 \begin{table}[h]
 \centering\small
-\caption{ArithmeticMNIST zero test. The zero group is the 404 of 2000 test samples where at least one digit is a 5, which is exactly $0$ after normalisation. ``Fix zero concept'' sets only the zero-valued concept(s) to the truth and keeps the other prediction. Task MSE, lower is better. Mean $\pm$ standard deviation over seeds. Bold: best mean among models with all 30 seeds. $^{\circ}$: \emph{not} significantly different from CEM (ours) (two-sided Wilcoxon signed-rank test paired by seed, $p \ge 0.05$); every unmarked difference is significant. \ddag: original CBM with a linear concept read-out (see Section~\ref{app:caveats}).}
+\caption{ArithmeticMNIST zero test. The zero group is the 404 of 2000 test samples where at least one digit is a 5, which is exactly $0$ after normalisation. ``Fix zero concept'' sets only the zero-valued concept(s) to the truth and keeps the other prediction. Task MAE, lower is better. Mean $\pm$ standard deviation over seeds. Bold: best mean. $^{\circ}$: \emph{not} significantly different from CEM (ours) (two-sided Wilcoxon signed-rank test paired by seed, $p \ge 0.05$); every unmarked difference is significant. \ddag: original CBM with a linear concept read-out (see Section~\ref{app:caveats}).}
 \label{tab:app-mnist-zero}
 \begin{tabular}{lcccc}
 \toprule
 \textbf{Model} & \textbf{Zero: no interv.} & \textbf{Zero: fix zero concept} & \textbf{Zero: fix all} & \textbf{Non-zero: fix all} \\
 \midrule
-CBM\,\textsuperscript{\ddag} & $42.35 \pm 16.59$ & $75.59 \pm 11.63$ & $99.85 \pm 3.33$ & $159.15 \pm 4.35$ \\
-CEM (ours) & $17.90 \pm 2.71$ & $11.88 \pm 1.90$ & $3.38 \pm 1.11$ & $5.53 \pm 1.37$ \\
-CEM-Linear & $25.67 \pm 6.71$ & $20.70 \pm 4.70$ & $23.46 \pm 4.25$ & $16.82 \pm 4.71$ \\
-CEM-Linear (no LN) & $37.75 \pm 9.17$ & $47.27 \pm 15.61$ & $32.83 \pm 6.29$ & $20.86 \pm 8.13$ \\
-Binned, $k{=}5$ & $14.68 \pm 4.09$ & $10.83 \pm 2.82^{\circ}$ & $3.57 \pm 1.17^{\circ}$ & $4.32 \pm 1.31$ \\
-Binned, $k{=}10$ & $12.84 \pm 3.99$ & $7.52 \pm 2.68$ & $2.19 \pm 0.96$ & $2.58 \pm 0.56$ \\
-Binned, $k{=}15$ & $\mathbf{11.37 \pm 3.06}$ & $\mathbf{7.02 \pm 2.10}$ & $\mathbf{1.41 \pm 0.54}$ & $\mathbf{1.49 \pm 0.63}$ \\
+CBM\,\textsuperscript{\ddag} & $4.41 \pm 0.72$ & $6.01 \pm 0.35$ & $7.80 \pm 0.09$ & $8.33 \pm 0.18$ \\
+CEM (ours) & $2.61 \pm 0.22$ & $2.05 \pm 0.18$ & $1.14 \pm 0.17$ & $1.34 \pm 0.15$ \\
+CEM-Linear & $3.27 \pm 0.38$ & $3.10 \pm 0.33$ & $3.26 \pm 0.33$ & $2.47 \pm 0.36$ \\
+CEM-Linear (no LN) & $4.24 \pm 0.52$ & $5.06 \pm 0.62$ & $4.47 \pm 0.43$ & $3.17 \pm 0.60$ \\
+Binned, $k{=}5$ & $2.08 \pm 0.30$ & $1.85 \pm 0.29$ & $1.33 \pm 0.21$ & $1.33 \pm 0.17^{\circ}$ \\
+Binned, $k{=}10$ & $1.75 \pm 0.33$ & $1.39 \pm 0.28$ & $0.99 \pm 0.22$ & $1.08 \pm 0.11$ \\
+Binned, $k{=}15$ & $\mathbf{1.58 \pm 0.23}$ & $\mathbf{1.25 \pm 0.21}$ & $\mathbf{0.83 \pm 0.15}$ & $\mathbf{0.84 \pm 0.15}$ \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -110,39 +128,59 @@ Binned, $k{=}15$ & $\mathbf{11.37 \pm 3.06}$ & $\mathbf{7.02 \pm 2.10}$ & $\math
 \label{app:pendulum}
 
 \begin{table}[h]
-\centering\small
-\caption{Pendulum, 30 seeds, 20 epochs. Concepts: pendulum angle $\theta$ and light angle $\varphi$; task: shadow position and length (2 outputs, raw units), a deterministic function of the concepts. Mean $\pm$ standard deviation over seeds. Bold: best mean among models with all 30 seeds. $^{\circ}$: \emph{not} significantly different from CEM (ours) (two-sided Wilcoxon signed-rank test paired by seed, $p \ge 0.05$); every unmarked difference is significant. \ddag: original CBM with a linear concept read-out (see Section~\ref{app:caveats}).}
+\centering\footnotesize
+\caption{Pendulum, 30 seeds, 20 epochs. Concepts: pendulum angle $\theta$ and light angle $\varphi$; task: shadow position and length (2 outputs, raw units), a deterministic function of the concepts. Mean absolute errors in raw units: task MAE averaged over the two outputs, $\theta$ and $\varphi$ MAE in the units of the dataset ($\theta \in [-200, 200]$, $\varphi \in [60, 140]$). Mean $\pm$ standard deviation over seeds. Bold: best mean. $^{\circ}$: \emph{not} significantly different from CEM (ours) (two-sided Wilcoxon signed-rank test paired by seed, $p \ge 0.05$); every unmarked difference is significant. \ddag: original CBM with a linear concept read-out (see Section~\ref{app:caveats}).}
 \label{tab:app-pendulum}
-\begin{tabular}{lcccc}
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{lccccc}
 \toprule
-\textbf{Model} & \textbf{Task MSE} & \textbf{Interv.\ MSE} & \textbf{Concept MSE} & \textbf{Concept acc.} \\
+\textbf{Model} & \textbf{Task MAE} & \textbf{Interv.\ MAE} & \textbf{$\theta$ MAE} & \textbf{$\varphi$ MAE} & \textbf{Bin acc.} \\
 \midrule
-CBM\,\textsuperscript{\ddag} & $0.4016 \pm 0.2062$ & $0.5903 \pm 0.2881$ & $0.0993 \pm 0.0459$ & --- \\
-CEM (ours) & $\mathbf{0.0274 \pm 0.0084}$ & $\mathbf{0.0230 \pm 0.0074}$ & $\mathbf{0.0109 \pm 0.0004}$ & --- \\
-CEM-Linear & $0.0497 \pm 0.0124$ & $0.0475 \pm 0.0115$ & $0.0118 \pm 0.0006$ & --- \\
-CEM-Linear (no LN) & $0.1854 \pm 0.0714$ & $0.1439 \pm 0.0457$ & $0.0126 \pm 0.0007$ & --- \\
-Binned, $k{=}5$ & $0.0443 \pm 0.0222$ & $0.0448 \pm 0.0200$ & $0.0297 \pm 0.0004$ & $\mathbf{0.987 \pm 0.002}$ \\
-Binned, $k{=}10$ & $0.0422 \pm 0.0131$ & $0.0442 \pm 0.0133$ & $0.0214 \pm 0.0000$ & $0.976 \pm 0.004$ \\
-Binned, $k{=}15$ & $0.0480 \pm 0.0172$ & $0.0497 \pm 0.0166$ & $0.0202 \pm 0.0001$ & $0.978 \pm 0.005$ \\
+CBM\,\textsuperscript{\ddag} & $0.437 \pm 0.142$ & $0.436 \pm 0.132$ & $50.21 \pm 21.11$ & $5.64 \pm 2.25$ & --- \\
+CEM (ours) & $\mathbf{0.126 \pm 0.019}$ & $\mathbf{0.116 \pm 0.018}$ & $\mathbf{6.83 \pm 0.69}$ & $\mathbf{1.20 \pm 0.30}$ & --- \\
+CEM-Linear & $0.170 \pm 0.021$ & $0.164 \pm 0.020$ & $7.88 \pm 0.58$ & $1.73 \pm 0.35$ & --- \\
+CEM-Linear (no LN) & $0.324 \pm 0.060$ & $0.302 \pm 0.057$ & $9.32 \pm 0.79$ & $2.01 \pm 0.38$ & --- \\
+Binned, $k{=}5$ & $0.154 \pm 0.034$ & $0.155 \pm 0.033$ & $23.40 \pm 0.00$ & $4.02 \pm 0.04$ & $\mathbf{0.987 \pm 0.002}$ \\
+Binned, $k{=}10$ & $0.152 \pm 0.023$ & $0.154 \pm 0.023$ & $13.70 \pm 0.00$ & $2.01 \pm 0.01$ & $0.976 \pm 0.004$ \\
+Binned, $k{=}15$ & $0.164 \pm 0.028$ & $0.166 \pm 0.027$ & $10.48 \pm 0.02$ & $1.35 \pm 0.02$ & $0.978 \pm 0.005$ \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 \begin{table}[h]
 \centering\small
-\caption{Pendulum zero test. Zero group: the 988 of 20000 test samples with a concept within $0.025$ of $0$ (normalised units). Columns as in Table~\ref{tab:app-mnist-zero}. Mean $\pm$ standard deviation over seeds. Bold: best mean among models with all 30 seeds. $^{\circ}$: \emph{not} significantly different from CEM (ours) (two-sided Wilcoxon signed-rank test paired by seed, $p \ge 0.05$); every unmarked difference is significant. \ddag: original CBM with a linear concept read-out (see Section~\ref{app:caveats}).}
+\caption{Pendulum zero test. Zero group: the 988 of 20000 test samples with a concept within $0.025$ of $0$ (normalised units). Columns as in Table~\ref{tab:app-mnist-zero}. Mean $\pm$ standard deviation over seeds. Bold: best mean. $^{\circ}$: \emph{not} significantly different from CEM (ours) (two-sided Wilcoxon signed-rank test paired by seed, $p \ge 0.05$); every unmarked difference is significant. \ddag: original CBM with a linear concept read-out (see Section~\ref{app:caveats}).}
 \label{tab:app-pendulum-zero}
 \begin{tabular}{lcccc}
 \toprule
 \textbf{Model} & \textbf{Zero: no interv.} & \textbf{Zero: fix zero concept} & \textbf{Zero: fix all} & \textbf{Non-zero: fix all} \\
 \midrule
-CBM\,\textsuperscript{\ddag} & $0.4697 \pm 0.2454$ & $2.8030 \pm 1.4446$ & $1.2106 \pm 0.7312$ & $0.5580 \pm 0.2676$ \\
-CEM (ours) & $\mathbf{0.0233 \pm 0.0092}$ & $\mathbf{0.0192 \pm 0.0079}$ & $\mathbf{0.0182 \pm 0.0075}$ & $\mathbf{0.0232 \pm 0.0075}$ \\
-CEM-Linear & $0.0495 \pm 0.0145$ & $0.0516 \pm 0.0158$ & $0.0539 \pm 0.0171$ & $0.0472 \pm 0.0117$ \\
-CEM-Linear (no LN) & $0.1359 \pm 0.0503$ & $0.1984 \pm 0.0352$ & $0.2452 \pm 0.0395$ & $0.1386 \pm 0.0467$ \\
-Binned, $k{=}5$ & $0.0312 \pm 0.0186^{\circ}$ & $0.0307 \pm 0.0181$ & $0.0310 \pm 0.0180$ & $0.0456 \pm 0.0202$ \\
-Binned, $k{=}10$ & $0.0420 \pm 0.0150$ & $0.0426 \pm 0.0152$ & $0.0432 \pm 0.0153$ & $0.0442 \pm 0.0133$ \\
-Binned, $k{=}15$ & $0.0413 \pm 0.0294$ & $0.0411 \pm 0.0291$ & $0.0414 \pm 0.0286$ & $0.0502 \pm 0.0163$ \\
+CBM\,\textsuperscript{\ddag} & $0.453 \pm 0.154$ & $1.062 \pm 0.437$ & $0.601 \pm 0.262$ & $0.427 \pm 0.126$ \\
+CEM (ours) & $\mathbf{0.115 \pm 0.023}$ & $\mathbf{0.105 \pm 0.022}$ & $\mathbf{0.102 \pm 0.022}$ & $\mathbf{0.117 \pm 0.018}$ \\
+CEM-Linear & $0.167 \pm 0.025$ & $0.170 \pm 0.025$ & $0.171 \pm 0.025$ & $0.164 \pm 0.020$ \\
+CEM-Linear (no LN) & $0.285 \pm 0.051$ & $0.344 \pm 0.039$ & $0.385 \pm 0.047$ & $0.298 \pm 0.058$ \\
+Binned, $k{=}5$ & $0.128 \pm 0.034^{\circ}$ & $0.128 \pm 0.034$ & $0.128 \pm 0.034$ & $0.156 \pm 0.033$ \\
+Binned, $k{=}10$ & $0.151 \pm 0.025$ & $0.153 \pm 0.026$ & $0.153 \pm 0.026$ & $0.154 \pm 0.023$ \\
+Binned, $k{=}15$ & $0.148 \pm 0.044$ & $0.147 \pm 0.044$ & $0.148 \pm 0.043$ & $0.167 \pm 0.027$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[h]
+\centering\small
+\caption{Pendulum swap test, task MAE (raw units). Swap test: every test input $x_A$ is given \emph{all} the concepts $c_B$ of another, randomly paired test sample (fixed pairing, identical for all models), and the output is scored against $y_B$ (``follows the concepts'') and against $y_A$ (``follows the input''). Since the task is a function of $(\theta, \varphi)$ only, a model that follows its concepts has a low error in the second column and a high one in the third. The third column has no `better' direction and is not bolded. Mean $\pm$ standard deviation over seeds. Bold: best mean. $^{\circ}$: \emph{not} significantly different from CEM (ours) (two-sided Wilcoxon signed-rank test paired by seed, $p \ge 0.05$); every unmarked difference is significant. \ddag: original CBM with a linear concept read-out (see Section~\ref{app:caveats}).}
+\label{tab:app-pendulum-swap}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Model} & \textbf{Interv.\ ($c_A$) vs.\ $y_A$} & \textbf{Swap ($c_B$) vs.\ $y_B$} & \textbf{Swap ($c_B$) vs.\ $y_A$} \\
+\midrule
+CBM\,\textsuperscript{\ddag} & $0.436 \pm 0.132$ & $\mathbf{0.436 \pm 0.132}$ & $3.589 \pm 0.049$ \\
+CEM (ours) & $\mathbf{0.116 \pm 0.018}$ & $2.968 \pm 0.064$ & $0.622 \pm 0.061$ \\
+CEM-Linear & $0.164 \pm 0.020$ & $2.465 \pm 0.088$ & $2.395 \pm 0.127$ \\
+CEM-Linear (no LN) & $0.302 \pm 0.057$ & $1.412 \pm 0.059$ & $2.923 \pm 0.062$ \\
+Binned, $k{=}5$ & $0.155 \pm 0.033$ & $2.591 \pm 0.098$ & $1.190 \pm 0.097$ \\
+Binned, $k{=}10$ & $0.154 \pm 0.023$ & $2.416 \pm 0.146$ & $1.381 \pm 0.151$ \\
+Binned, $k{=}15$ & $0.166 \pm 0.027$ & $2.220 \pm 0.158$ & $1.669 \pm 0.172$ \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -151,34 +189,34 @@ Binned, $k{=}15$ & $0.0413 \pm 0.0294$ & $0.0411 \pm 0.0291$ & $0.0414 \pm 0.028
 \label{app:lidc}
 
 \begin{table}[h]
-\centering\small
-\caption{LIDC-IDRI malignancy (binary), 9 concepts (six radiologist ratings on a 1--5 scale and three size measurements: diameter, volume, surface area), 30 seeds, 250 epochs; train/test split by patient, redrawn per seed (same split for every model within a seed). Higher is better except concept MSE. Mean $\pm$ standard deviation over seeds. Bold: best mean among models with all 30 seeds. $^{\circ}$: \emph{not} significantly different from CEM (ours) (two-sided Wilcoxon signed-rank test paired by seed, $p \ge 0.05$); every unmarked difference is significant. \ddag: original CBM with a linear concept read-out (see Section~\ref{app:caveats}). \todo{Binned $k{=}5$ and $k{=}10$ are still running.}}
+\centering\footnotesize
+\caption{LIDC-IDRI malignancy (binary), 9 concepts (six radiologist ratings on a 1--5 scale and three size measurements: diameter, volume, surface area), 30 seeds, 250 epochs; train/test split by patient, redrawn per seed (same split for every model within a seed). Higher is better except concept errors (plain accuracy shows the same ordering and is in the result files). Concept MAE (rel.) is the raw-unit absolute error divided by the concept's range, averaged over concepts (per-concept raw errors in Table~\ref{tab:app-lidc-raw}). Mean $\pm$ standard deviation over seeds. Bold: best mean. $^{\circ}$: \emph{not} significantly different from CEM (ours) (two-sided Wilcoxon signed-rank test paired by seed, $p \ge 0.05$); every unmarked difference is significant. \ddag: original CBM with a linear concept read-out (see Section~\ref{app:caveats}).}
 \label{tab:app-lidc}
-\setlength{\tabcolsep}{4pt}
-\begin{tabular}{lccccc}
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{lccc}
 \toprule
-\textbf{Model} & \textbf{Task bal.\ acc.} & \textbf{Task acc.} & \textbf{Interv.\ bal.\ acc.} & \textbf{Interv.\ acc.} & \textbf{Concept MSE} \\
+\textbf{Model} & \textbf{Task bal.\ acc.} & \textbf{Interv.\ bal.\ acc.} & \textbf{Concept MAE (rel.)} \\
 \midrule
-CBM\,\textsuperscript{\ddag} & $0.839 \pm 0.026^{\circ}$ & $0.844 \pm 0.027^{\circ}$ & $0.847 \pm 0.018$ & $0.850 \pm 0.019$ & $0.1093 \pm 0.0073^{\circ}$ \\
-CEM (ours) & $0.831 \pm 0.027$ & $0.835 \pm 0.031$ & $0.868 \pm 0.016$ & $0.871 \pm 0.017$ & $0.1096 \pm 0.0069$ \\
-CEM-Linear & $0.838 \pm 0.026^{\circ}$ & $0.841 \pm 0.029^{\circ}$ & $0.869 \pm 0.022^{\circ}$ & $0.872 \pm 0.024^{\circ}$ & $\mathbf{0.1089 \pm 0.0076}^{\circ}$ \\
-CEM-Linear (no LN) & $\mathbf{0.843 \pm 0.022}$ & $\mathbf{0.848 \pm 0.024}$ & $\mathbf{0.872 \pm 0.019}^{\circ}$ & $\mathbf{0.875 \pm 0.020}^{\circ}$ & $0.1092 \pm 0.0077^{\circ}$ \\
-Binned, $k{=}5$ & $0.839 \pm 0.030^{\circ}$ & $0.841 \pm 0.032^{\circ}$ & $0.857 \pm 0.022$ & $0.858 \pm 0.022$ & $0.1322 \pm 0.0093$ \\
-Binned, $k{=}10$ & $0.837 \pm 0.026^{\circ}$ & $0.842 \pm 0.029^{\circ}$ & $0.846 \pm 0.018$ & $0.847 \pm 0.017$ & $0.1344 \pm 0.0114$ \\
-Binned, $k{=}15$ & $0.835 \pm 0.028^{\circ}$ & $0.834 \pm 0.031^{\circ}$ & $0.830 \pm 0.019$ & $0.830 \pm 0.019$ & $0.1462 \pm 0.0119$ \\
+CBM\,\textsuperscript{\ddag} & $0.839 \pm 0.026^{\circ}$ & $0.847 \pm 0.018$ & $0.1174 \pm 0.0047$ \\
+CEM (ours) & $0.831 \pm 0.027$ & $0.868 \pm 0.016$ & $0.1145 \pm 0.0030$ \\
+CEM-Linear & $0.838 \pm 0.026^{\circ}$ & $0.869 \pm 0.022^{\circ}$ & $\mathbf{0.1141 \pm 0.0042}^{\circ}$ \\
+CEM-Linear (no LN) & $\mathbf{0.843 \pm 0.022}$ & $\mathbf{0.872 \pm 0.019}^{\circ}$ & $0.1146 \pm 0.0041^{\circ}$ \\
+Binned, $k{=}5$ & $0.839 \pm 0.030^{\circ}$ & $0.857 \pm 0.022$ & $0.1265 \pm 0.0031$ \\
+Binned, $k{=}10$ & $0.837 \pm 0.026^{\circ}$ & $0.846 \pm 0.018$ & $0.1168 \pm 0.0045$ \\
+Binned, $k{=}15$ & $0.835 \pm 0.028^{\circ}$ & $0.830 \pm 0.019$ & $0.1184 \pm 0.0042$ \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 \begin{table}[h]
 \centering\small
-\caption{LIDC-IDRI zero test, balanced accuracy. Zero group: test nodules with a concept within $0.025$ of $0$; 52 of 233 test nodules on average (range 38--69), so these estimates are noisy. Columns as in Table~\ref{tab:app-mnist-zero}. Mean $\pm$ standard deviation over seeds. Bold: best mean among models with all 30 seeds. $^{\circ}$: \emph{not} significantly different from CEM (ours) (two-sided Wilcoxon signed-rank test paired by seed, $p \ge 0.05$); every unmarked difference is significant. \ddag: original CBM with a linear concept read-out (see Section~\ref{app:caveats}).}
+\caption{LIDC-IDRI zero test, balanced accuracy. Zero group: test nodules with a concept within $0.025$ of $0$; 52 of 233 test nodules on average (range 38--69), so these estimates are noisy. Columns as in Table~\ref{tab:app-mnist-zero}. Mean $\pm$ standard deviation over seeds. Bold: best mean. $^{\circ}$: \emph{not} significantly different from CEM (ours) (two-sided Wilcoxon signed-rank test paired by seed, $p \ge 0.05$); every unmarked difference is significant. \ddag: original CBM with a linear concept read-out (see Section~\ref{app:caveats}).}
 \label{tab:app-lidc-zero}
 \begin{tabular}{lcccc}
 \toprule
 \textbf{Model} & \textbf{Zero: no interv.} & \textbf{Zero: fix zero concept} & \textbf{Zero: fix all} & \textbf{Non-zero: fix all} \\
 \midrule
-CBM\,\textsuperscript{\ddag} & $0.872 \pm 0.033^{\circ}$ & $\mathbf{0.888 \pm 0.041}^{\circ}$ & $0.914 \pm 0.034^{\circ}$ & $0.824 \pm 0.025$ \\
+CBM\,\textsuperscript{\ddag} & $0.872 \pm 0.034^{\circ}$ & $\mathbf{0.888 \pm 0.041}^{\circ}$ & $0.914 \pm 0.034^{\circ}$ & $0.824 \pm 0.025$ \\
 CEM (ours) & $0.873 \pm 0.053$ & $0.881 \pm 0.049$ & $0.917 \pm 0.034$ & $0.850 \pm 0.017$ \\
 CEM-Linear & $0.873 \pm 0.049^{\circ}$ & $0.885 \pm 0.049^{\circ}$ & $0.925 \pm 0.042^{\circ}$ & $0.849 \pm 0.022^{\circ}$ \\
 CEM-Linear (no LN) & $\mathbf{0.876 \pm 0.050}^{\circ}$ & $0.884 \pm 0.047^{\circ}$ & $\mathbf{0.929 \pm 0.037}$ & $\mathbf{0.851 \pm 0.020}^{\circ}$ \\
@@ -191,13 +229,54 @@ Binned, $k{=}15$ & $0.868 \pm 0.054^{\circ}$ & $0.872 \pm 0.055^{\circ}$ & $0.88
 
 \begin{table}[h]
 \centering\small
+\caption{LIDC-IDRI swap test, balanced accuracy. Swap test: every test input $x_A$ is given \emph{all} the concepts $c_B$ of another, randomly paired test sample (fixed pairing, identical for all models), and the output is scored against $y_B$ (``follows the concepts'') and against $y_A$ (``follows the input''). Malignancy is not a function of the concepts, so $y_B$ is only the label most consistent with $c_B$; CBM, whose head sees only the concepts, gives the reference. The third column is not bolded. Mean $\pm$ standard deviation over seeds. Bold: best mean. $^{\circ}$: \emph{not} significantly different from CEM (ours) (two-sided Wilcoxon signed-rank test paired by seed, $p \ge 0.05$); every unmarked difference is significant. \ddag: original CBM with a linear concept read-out (see Section~\ref{app:caveats}).}
+\label{tab:app-lidc-swap}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Model} & \textbf{Interv.\ ($c_A$) vs.\ $y_A$} & \textbf{Swap ($c_B$) vs.\ $y_B$} & \textbf{Swap ($c_B$) vs.\ $y_A$} \\
+\midrule
+CBM\,\textsuperscript{\ddag} & $0.847 \pm 0.018$ & $\mathbf{0.847 \pm 0.018}$ & $0.503 \pm 0.037$ \\
+CEM (ours) & $0.868 \pm 0.016$ & $0.667 \pm 0.033$ & $0.757 \pm 0.029$ \\
+CEM-Linear & $0.869 \pm 0.022^{\circ}$ & $0.657 \pm 0.033$ & $0.762 \pm 0.031^{\circ}$ \\
+CEM-Linear (no LN) & $\mathbf{0.872 \pm 0.019}^{\circ}$ & $0.669 \pm 0.031^{\circ}$ & $0.754 \pm 0.032^{\circ}$ \\
+Binned, $k{=}5$ & $0.857 \pm 0.022$ & $0.701 \pm 0.031$ & $0.708 \pm 0.036$ \\
+Binned, $k{=}10$ & $0.846 \pm 0.018$ & $0.731 \pm 0.040$ & $0.648 \pm 0.036$ \\
+Binned, $k{=}15$ & $0.830 \pm 0.019$ & $0.720 \pm 0.037$ & $0.641 \pm 0.032$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[h]
+\centering\small
+\caption{LIDC-IDRI concept error in raw units: mean absolute error of each predicted concept, mean over 30 seeds (standard deviations in the result files). Ours: CEM (ours); Lin.: CEM-Linear; $k$: binned. Bold: lowest error. $^{\circ}$: not significantly different from CEM (ours) (Wilcoxon, $p \ge 0.05$). \ddag: original CBM (Section~\ref{app:caveats}).}
+\label{tab:app-lidc-raw}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{llccccccc}
+\toprule
+\textbf{Concept} & \textbf{Range} & \textbf{CBM\textsuperscript{\ddag}} & \textbf{Ours} & \textbf{Lin.} & \textbf{Lin.\ no LN} & \textbf{$k{=}5$} & \textbf{$k{=}10$} & \textbf{$k{=}15$} \\
+\midrule
+Subtlety & 1--5 & $0.55$ & $\mathbf{0.54}$ & $0.54^{\circ}$ & $0.54$ & $0.61$ & $0.59$ & $0.60$ \\
+Sphericity & 1--5 & $\mathbf{0.51}^{\circ}$ & $0.51$ & $0.51^{\circ}$ & $0.51^{\circ}$ & $0.55$ & $0.54$ & $0.56$ \\
+Margin & 1--5 & $0.65^{\circ}$ & $\mathbf{0.64}$ & $0.65^{\circ}$ & $0.65^{\circ}$ & $0.68$ & $0.73$ & $0.80$ \\
+Lobulation & 1--5 & $0.51^{\circ}$ & $0.51$ & $\mathbf{0.50}^{\circ}$ & $0.51^{\circ}$ & $0.51^{\circ}$ & $0.55$ & $0.54$ \\
+Spiculation & 1--5 & $0.52^{\circ}$ & $0.52$ & $0.51^{\circ}$ & $\mathbf{0.51}^{\circ}$ & $0.54$ & $0.51^{\circ}$ & $0.56$ \\
+Texture & 1--5 & $0.58^{\circ}$ & $0.57$ & $0.57^{\circ}$ & $0.57^{\circ}$ & $0.52$ & $\mathbf{0.47}$ & $0.47$ \\
+Diameter & 2.6--50 mm & $3.18$ & $3.01$ & $2.84$ & $2.97^{\circ}$ & $2.71$ & $2.36$ & $\mathbf{2.31}$ \\
+Volume & 8.5--31{,}112 mm$^3$ & $727$ & $\mathbf{611}$ & $646^{\circ}$ & $645^{\circ}$ & $1{,}597$ & $856$ & $635^{\circ}$ \\
+Surface area & 14--9{,}027 mm$^2$ & $288$ & $257$ & $246^{\circ}$ & $256^{\circ}$ & $402$ & $237^{\circ}$ & $\mathbf{190}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[h]
+\centering\small
 \caption{Trainable parameters per model (encoder + bottleneck + head). All models share the encoder, concept-network width ($64$), depth ($2$) and embedding size ($16$ per concept); only the bottleneck differs.}
 \label{tab:app-params}
 \begin{tabular}{lrrr}
 \toprule
 \textbf{Model} & \textbf{ArithmeticMNIST} & \textbf{Pendulum} & \textbf{LIDC-IDRI} \\
 \midrule
-CBM & 94{,}115 & 94{,}724 & 294{,}059 \\
+CBM\,\textsuperscript{\ddag} & 94{,}115 & 94{,}724 & 294{,}059 \\
 CEM (ours) & 159{,}267 & 159{,}876 & 591{,}275 \\
 CEM-Linear & 130{,}307 & 130{,}916 & 460{,}955 \\
 CEM-Linear (no LN) & 130{,}243 & 130{,}852 & 460{,}667 \\

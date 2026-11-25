@@ -390,7 +390,12 @@ def _task_metrics(out, y, D, prefix):
         return {}
     if D["task"] == "regression":
         pred = out * D["y_std"] + D["y_mean"]
-        return {f"{prefix}_mse": ((pred - y.view_as(pred)) ** 2).mean().item()}
+        err = pred - y.view_as(pred)
+        res = {f"{prefix}_mse": (err ** 2).mean().item(), f"{prefix}_mae": err.abs().mean().item()}
+        if err.shape[1] > 1 and prefix in ("task", "interv"):       # e.g. Pendulum: per output
+            for j in range(err.shape[1]):
+                res[f"{prefix}_mae{j}"] = err[:, j].abs().mean().item()
+        return res
     p = out.argmax(1)
     res = {f"{prefix}_acc": (p == y).float().mean().item()}
     if all((y == k).any() for k in (0, 1)):
@@ -610,6 +615,8 @@ def main():
                                   "epochs": ck["hp"]["epochs"], "params": sum(p.numel() for p in model.parameters()),
                                   "train_seconds": "", **res})
                 print(f"  seed {seed}: re-evaluated", flush=True)
+                del model, D, ck, sd, res
+                free_device_memory()
                 continue
             n_par = sum(p.numel() for p in model.parameters())
             print(f"  seed {seed}: {n_par:,} params | {hp}", flush=True)
@@ -634,6 +641,16 @@ def main():
         print(f"  -> {path}")
 
     summarize(a.dataset, a.tag)
+
+
+def free_device_memory():
+    """LIDC re-loads its data every seed; without this MPS runs out of memory after ~8 seeds."""
+    import gc
+    gc.collect()
+    if torch.backends.mps.is_available():
+        torch.mps.empty_cache()
+    elif torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
 
 if __name__ == "__main__":

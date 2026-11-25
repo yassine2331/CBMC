@@ -52,7 +52,7 @@ done
 if [ -n "$SYNC" ]; then
     echo "== downloading checkpoints from $REMOTE"
     mkdir -p outputs/models
-    rsync -a --info=progress2 "$REMOTE/outputs/models/benchmark" outputs/models/ \
+    rsync -a "$REMOTE/outputs/models/benchmark" outputs/models/ \
         || { echo "rsync failed" >&2; exit 1; }
 fi
 
@@ -66,6 +66,9 @@ for f in glob.glob("outputs/models/benchmark/*/cem_linear_raw_seed*.pt"):
         new = f.replace("cem_linear_raw_seed", "cem_linear_noln_seed")
         if not os.path.exists(new):
             os.rename(f, new); n += 1
+        else:
+            print(f"   WARNING: {f} has no LayerNorm (trained with the OLD code, i.e. a no-LN model); "
+                  "it will be skipped. Retrain cem_linear_raw with the current code.")
 print(f"== renamed {n} old no-LayerNorm checkpoints to cem_linear_noln")
 PYEOF
 
@@ -76,8 +79,17 @@ for d in $DATASETS; do
             echo "== $d / $m: no checkpoints, skipped"; continue
         fi
         echo "== $d / $m"
-        "$PY" scripts/run_benchmark.py --dataset "$d" --models "$m" --eval-only --tag eval \
-              --num-workers 0 $EXTRA 2>&1 | grep -v -E "Warning|warn\(" | grep -E "seed [0-9]|skipped|Error|cannot" | tail -2
+        n_ck=$(ls outputs/models/benchmark/$d/${m}_seed*.pt | wc -l)
+        csv="outputs/results/benchmark/$d/${m}_eval.csv"
+        flags="$EXTRA"
+        for attempt in 1 2 3; do       # resumable: a crash (e.g. GPU out of memory) just continues
+            "$PY" scripts/run_benchmark.py --dataset "$d" --models "$m" --eval-only --tag eval \
+                  --num-workers 0 $flags 2>&1 | grep -v -E "Warning|warn\(" | grep -E "seed [0-9]|skipped|Error|cannot" | tail -2
+            flags=""                   # never --overwrite on a retry
+            n_done=$(( $( [ -f "$csv" ] && wc -l < "$csv" || echo 1 ) - 1 ))
+            [ "$n_done" -ge "$n_ck" ] && break
+            echo "   $n_done / $n_ck seeds evaluated, resuming (attempt $((attempt + 1)))"
+        done
     done
 done
 

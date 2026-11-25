@@ -1,5 +1,7 @@
 % =====================================================================
-%  Draft Results text (framing). Numbers from appendix_results.tex.
+%  Draft Results text (framing). Numbers from appendix_results.tex
+%  (re-evaluated checkpoints, <model>_eval.csv, 30 seeds everywhere).
+%  All errors are MAE in raw units.
 %  CBM sentences assume the rerun with per-concept MLPs keeps the same
 %  ordering -- check before submission.
 % =====================================================================
@@ -18,15 +20,16 @@ The zero test isolates the samples in which a concept equals $0$
 groups can differ in difficulty, we compare each model's error on the zero
 group with its own error on the non-zero group. For CEM (ours) and every binned
 model the zero group is \emph{not} harder under full intervention
-(ArithmeticMNIST: $3.38$ vs.\ $5.53$; Pendulum: $0.018$ vs.\ $0.023$). For the
-multiplicative variants it is: on ArithmeticMNIST the intervened error rises from
-$16.8$ to $23.5$ ($+39\%$) for CEM-Linear and from $20.9$ to $32.8$ ($+57\%$)
-for CEM-Linear (no LN), and on Pendulum from $0.139$ to $0.245$ ($+77\%$) for
-CEM-Linear (no LN). Correcting \emph{only} the zero-valued concept shows the same
-pattern: it reduces the error of CEM (ours) from $17.9$ to $11.9$, but barely
-helps CEM-Linear ($25.7 \to 20.7$) and \emph{increases} the error of
-CEM-Linear (no LN) ($37.8 \to 47.3$): telling these models the correct value $0$
-erases the information carried by that concept's embedding.
+(task MAE, ArithmeticMNIST: $1.14$ vs.\ $1.34$; Pendulum: $0.102$ vs.\
+$0.117$). For the multiplicative variants it is: on ArithmeticMNIST the
+intervened error rises from $2.47$ to $3.26$ ($+32\%$) for CEM-Linear and from
+$3.17$ to $4.47$ ($+41\%$) for CEM-Linear (no LN), and on Pendulum from $0.298$
+to $0.385$ ($+29\%$) for CEM-Linear (no LN). Correcting \emph{only} the
+zero-valued concept shows the same pattern: it reduces the error of CEM (ours)
+from $2.61$ to $2.06$, but barely helps CEM-Linear ($3.27 \to 3.10$) and
+\emph{increases} the error of CEM-Linear (no LN) (ArithmeticMNIST
+$4.24 \to 5.06$; Pendulum $0.285 \to 0.344$): telling these models the correct
+value $0$ erases the information carried by that concept's embedding.
 
 The generative setting makes the mechanism visible
 (Table~\ref{tab:app-zero-gen}). Object shape is not a concept, so it reaches the
@@ -56,18 +59,24 @@ $k$ bin centres.
 These costs pay off only when the concepts are themselves discrete. The
 ArithmeticMNIST concepts are digits, i.e.\ nine categories, and with $k \geq 10$
 bins every digit gets its own embedding; here binning is the correct inductive
-bias and the binned models are the most accurate (task MSE $13.9$ vs.\ $22.5$
-for $k = 15$), while $k = 5$, which merges digits, is not significantly better
-than ours on task error. On Pendulum, whose concepts are genuinely continuous
+bias and the binned models are the most accurate (task MAE $1.55$ vs.\ $2.59$
+for $k = 15$; intervened $0.84$ vs.\ $1.30$). With $k = 5$, which merges
+digits, binning is still better without intervention ($2.17$ vs.\ $2.59$) and
+tied with ours under intervention ($1.33$ vs.\ $1.30$, $p = 0.7$). On Pendulum, whose concepts are genuinely continuous
 angles, our model is the most accurate on every metric: binned models have
-$1.5$--$1.8\times$ its task error and about $2\times$ its intervention error,
-and their concept error is bounded below by the bin width ($0.020$--$0.030$
-vs.\ $0.011$), whatever the number of bins we tried. On LIDC-IDRI, binning is
+$1.2$--$1.3\times$ its task error ($0.152$--$0.164$ vs.\ $0.126$) and
+$1.3$--$1.4\times$ its intervention error ($0.154$--$0.166$ vs.\ $0.116$), and
+their concept error is bounded below by the bin width, whatever the number of
+bins we tried: the pendulum angle is off by $10.5$--$23.4$ (in the units of the
+dataset) against $6.8$ for ours. On LIDC-IDRI, binning is
 worse than every continuous CEM under intervention, and increasingly so with
 more bins: balanced accuracy $0.857$, $0.846$ and $0.830$ for $k = 5, 10, 15$,
 against $0.868$ for ours (all $p < 0.05$), with $1.7\times$, $2.8\times$ and
-$3.9\times$ the parameters, and a higher concept error ($0.132$--$0.146$ vs.\
-$0.110$). Without intervention all models are tied. The Shapes3D results agree: the binned model reaches $0.933$
+$3.9\times$ the parameters, and a higher concept error ($0.117$--$0.127$ vs.\
+$0.115$ relative absolute error, all $p < 0.01$). The raw-unit errors per concept
+(Table~\ref{tab:app-lidc-raw}) qualify this: binned models with $k \ge 10$ are
+more accurate on texture, diameter and surface area, and worse on the other
+ratings and on volume. Without intervention all models are tied. The Shapes3D results agree: the binned model reaches $0.933$
 concept accuracy, against $0.9997$ for ours, on concepts whose true values lie
 on a fixed grid.
 
@@ -84,3 +93,23 @@ does not appear on this dataset (Table~\ref{tab:app-lidc-zero}). We read this as
 evidence that the representation we propose does not cost performance on real
 data, while it removes a failure mode that the multiplicative variants exhibit
 whenever zero-valued concepts carry a large share of the bottleneck.
+
+\paragraph{Following interventions that contradict the input.}
+Full intervention with the \emph{true} concepts favours the embedding models,
+but these concepts agree with the input. The swap test
+(Tables~\ref{tab:app-pendulum-swap} and~\ref{tab:app-lidc-swap}) instead feeds
+each input the concepts of another sample. On Pendulum, where the target is a
+function of the concepts, CBM follows them exactly (its head sees nothing
+else), whereas every embedding model partly predicts from the input: the error
+with respect to the new target (task MAE) is $0.44$ for CBM, $1.41$ for
+CEM-Linear (no LN), $2.22$--$2.59$ for the binned models, $2.47$ for
+CEM-Linear and $2.97$ for ours, and our predictions stay close to the
+\emph{original} target (MAE $0.62$). On
+LIDC-IDRI the pattern is weaker but the same (balanced accuracy against the new
+label $0.66$--$0.67$ for the continuous CEMs, $0.70$--$0.73$ binned, $0.85$
+CBM). Anchor interpolation therefore gives the most accurate interventions when
+the intervened concepts are consistent with the input, and the least faithful
+ones when they are not: the input-dependent anchors carry enough information
+about the input to override a contradictory concept value. Counterfactual
+training addresses exactly this case (Section~\ref{app:shapes3d}).
+\todo{Decide how to present this; consider the swap loss for the benchmark.}
